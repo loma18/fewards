@@ -78,6 +78,41 @@ chmod +x scripts/workbuddy-token.sh
 ./scripts/workbuddy-token.sh
 ```
 
+## Sync with the desktop console
+
+Fewards can hand WorkBuddy credentials to [workbuddy-console](https://github.com/loma18/workbuddy-console) over the local network, and take back whatever the desktop refreshed. Optional — the phone works fine on its own.
+
+### Why it exists
+
+WorkBuddy's `refresh_token` is **rotating**: one successful refresh invalidates the previous value everywhere else. Before this feature the phone stored the token but never used it, so an account silently died once its `access_token` expired — the only fix was re-scanning the QR code.
+
+### Setup
+
+1. On the desktop, open **Settings → 手机同步（局域网）**, turn it on, copy the **address** and **pair code**
+2. On the phone, open **Settings → WorkBuddy → 设备同步**, paste both values
+3. Tick the accounts you want (all ticked by default) → **推送到电脑**
+
+### Two buttons, and the order matters
+
+| Button | What it does | Cost |
+|---|---|---|
+| **刷新选中账号** | Calls the official refresh endpoint with each account's `refresh_token` | Rotates the token — the desktop copy dies immediately |
+| **推送到电脑** | Sends current credentials and writes back what the desktop returns | No token change, safe anytime |
+
+**Always push right after refreshing.** The UI says so, and it is not a suggestion: the refresh already invalidated the copy the desktop holds.
+
+### Notes
+
+- Both devices must be on the **same LAN** (same Wi-Fi, or the desktop on the phone's hotspot). Guest networks with AP isolation will not work.
+- Only **private addresses** are accepted (`10.x` / `172.16-31.x` / `192.168.x` / `127.x`). Public IPs and domain names are rejected on purpose — these are long-lived credentials.
+- Cleartext HTTP is allowed for this feature (`res/xml/network_security_config.xml`). Android 9+ blocks it by default and a home LAN has no certificate.
+- The account the desktop is **currently signed in with** is protected: the desktop returns it untouched, and the phone keeps its own copy. Overwriting it would sign the desktop out.
+- Accounts imported by pasting a token have no `uid`; the desktop shows them as `wb_<timestamp>`. Functionality is unaffected.
+- **No background auto-refresh.** Doze and OEM battery savers make scheduled work unreliable, and a refresh without a successful push would leave the desktop broken. Open the app and tap refresh instead.
+- If the desktop is offline the push fails with a readable message and nothing is written locally, so you can retry later.
+
+Covered by unit tests: `./gradlew :app:testDebugUnitTest` (protocol fields, time units, address validation, client request headers).
+
 ## Build
 
 The package you ship to users must be **release + R8**:
