@@ -126,6 +126,16 @@ class AccountViewModel : ViewModel() {
                 AppLog.i("MHY", "账号 ${result.nickname} 扫码登录成功")
                 _uiState.update { it.copy(qrState = QrState.Confirmed) }
                 refresh()
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                /**
+                 * 主动取消**不是失败**。
+                 *
+                 * 关弹窗（`onCancelWbQr`）、切 Tab、点「重新获取」都会 cancel 这个 job。
+                 * 而取消是在协程的下一个挂起点（`delay` / 网络请求）抛出的——如果被下面
+                 * 的 catch(Throwable) 接住，就会把刚写入的 Confirmed 覆盖成 Error，
+                 * 弹窗消失动画期间显示成「获取二维码失败」，账号其实已经存进去了。
+                 */
+                throw c
             } catch (t: Throwable) {
                 AppLog.e("MHY", "扫码登录失败: ${t.message}")
                 _uiState.update {
@@ -180,7 +190,7 @@ class AccountViewModel : ViewModel() {
      */
     fun startWbQrLogin() {
         wbQrJob?.cancel()
-        _uiState.update { it.copy(wbQrState = QrState.Loading, wbQrContent = "") }
+        _uiState.update { it.copy(wbQrState = QrState.Loading, wbQrContent = "", wbQrError = "") }
         wbQrJob = viewModelScope.launch {
             try {
                 val session = wbLogin.startLogin()
@@ -205,13 +215,27 @@ class AccountViewModel : ViewModel() {
                     )
                 )
                 AppLog.i("WB", "账号 ${result.nickname} 扫码授权成功${if (existed) "（已更新）" else ""}")
-                _uiState.update { it.copy(wbQrState = QrState.Confirmed) }
+                // 先刷新列表再标记成功：Confirmed 会触发弹窗关闭并 cancel 本协程，
+                // 顺序反了就可能"账号已落库、列表却没刷新"
                 publishAccounts()
+                _uiState.update { it.copy(wbQrState = QrState.Confirmed) }
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                /**
+                 * 主动取消**不是失败**。
+                 *
+                 * 关弹窗（`onCancelWbQr`）、切 Tab、点「重新获取」都会 cancel 这个 job。
+                 * 而取消是在协程的下一个挂起点（`delay` / 网络请求）抛出的——如果被下面
+                 * 的 catch(Throwable) 接住，就会把刚写入的 Confirmed 覆盖成 Error，
+                 * 弹窗消失动画期间显示成「获取二维码失败」，账号其实已经存进去了。
+                 */
+                throw c
             } catch (t: Throwable) {
                 AppLog.e("WB", "扫码授权失败: ${t.message}")
+                val detail = (t.message ?: t.javaClass.simpleName).take(120)
                 _uiState.update {
                     it.copy(
                         wbQrState = if (t.message?.contains("过期") == true) QrState.Expired else QrState.Error,
+                        wbQrError = detail,
                     )
                 }
             }

@@ -24,6 +24,8 @@ data class AccountUiState(
     val wbLoginMode: Int = 0, // 0 扫码；1 Token
     val wbQrState: QrState = QrState.Idle,
     val wbQrContent: String = "",
+    /** 失败时的原始错误信息（网络异常等），显示在二维码下方，避免只给一句「获取二维码失败」 */
+    val wbQrError: String = "",
     // Bing
     val bingAccounts: List<AccountRepository.BingAccount> = emptyList(),
     val bingLoginMode: Int = 0, // 0 微软登录（WebView）；1 refresh_token

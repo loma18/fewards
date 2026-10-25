@@ -230,13 +230,15 @@ fun AccountPagerMiuix(
                 QrState.Idle, QrState.Loading -> ""
                 else -> state.wbQrContent
             },
-            qrMessage = stringResource(
-                when (state.wbQrState) {
-                    QrState.Expired -> R.string.qr_expired
-                    QrState.Error -> R.string.qr_failed
-                    else -> R.string.workbuddy_qr_wait_scan
+            qrMessage = when (state.wbQrState) {
+                QrState.Expired -> stringResource(R.string.qr_expired)
+                QrState.Error -> {
+                    // 把真实原因带上：只显示「获取二维码失败」时，用户和开发者都无从下手
+                    val base = stringResource(R.string.qr_failed)
+                    if (state.wbQrError.isBlank()) base else "$base：${state.wbQrError}"
                 }
-            ),
+                else -> stringResource(R.string.workbuddy_qr_wait_scan)
+            },
             canRetry = state.wbQrState == QrState.Expired || state.wbQrState == QrState.Error,
             credentialLabel = stringResource(R.string.workbuddy_token_hint),
             credentialAction = stringResource(R.string.workbuddy_token_import),
