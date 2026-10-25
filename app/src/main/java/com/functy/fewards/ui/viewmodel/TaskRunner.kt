@@ -141,6 +141,32 @@ object TaskRunner {
                     }
                     val engine = WorkBuddyEngine(MihoyoApi.defaultClient(), list)
                     val ok = engine.runAll()
+
+                    /**
+                     * 成长中心排在签到之后：签到给的基础积分先到账，旅行/任务/兑换/盲盒
+                     * 才有可能解锁新的奖励（比如任务送的抽奖机会）。
+                     *
+                     * 每个账号独立跑，一个失败不影响其余；硬失败（5xx / 网络不可达）只记日志，
+                     * 不把整轮签到判成失败——签到本身可能已经成功了。
+                     */
+                    if (repo.wbGrowthEnabled) {
+                        val growth = com.functy.fewards.core.workbuddy.WorkBuddyGrowth(MihoyoApi.defaultClient())
+                        var growthCredits = 0
+                        for (acc in list) {
+                            val r = runCatching { growth.run(acc) }.getOrNull()
+                            if (r == null) {
+                                AppLog.w("WB", "成长中心 ${acc.label}: 执行异常")
+                                continue
+                            }
+                            growthCredits += r.creditsGained
+                            if (r.parts.isNotEmpty() || r.creditsGained > 0) {
+                                AppLog.i("WB", "成长中心 ${acc.label}: ${r.report}")
+                            }
+                            kotlinx.coroutines.delay(400)
+                        }
+                        if (growthCredits > 0) summaries.add("成长中心: +$growthCredits 积分")
+                    }
+
                     if (ok) accounts.markDoneToday("wb")
                     _state.value = _state.value.copy(
                         wbRunning = false,

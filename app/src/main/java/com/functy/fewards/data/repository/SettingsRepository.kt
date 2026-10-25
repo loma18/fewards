@@ -32,6 +32,10 @@ interface SettingsRepository {
 
     // WorkBuddy
     var wbMasterEnabled: Boolean
+    /** 每日签到后自动跑成长中心（旅行 / 任务 / 补登 / 兑换 / 盲盒）；默认开启 */
+    var wbGrowthEnabled: Boolean
+    /** 凭据临期自动刷新；默认开启 */
+    var wbAutoRefresh: Boolean
     /** 电脑端同步地址，形如 `192.168.1.5:57900`；空 = 未配置 */
     var wbSyncEndpoint: String
     /** 与电脑端一致的配对码 */

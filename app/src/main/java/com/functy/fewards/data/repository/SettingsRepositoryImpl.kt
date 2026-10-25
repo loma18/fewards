@@ -110,6 +110,14 @@ class SettingsRepositoryImpl : SettingsRepository {
         get() = prefs.getBoolean("wb_master_enabled", true)
         set(value) = prefs.edit { putBoolean("wb_master_enabled", value) }
 
+    override var wbGrowthEnabled: Boolean
+        get() = prefs.getBoolean("wb_growth_enabled", true)
+        set(value) = prefs.edit { putBoolean("wb_growth_enabled", value) }
+
+    override var wbAutoRefresh: Boolean
+        get() = prefs.getBoolean("wb_auto_refresh", true)
+        set(value) = prefs.edit { putBoolean("wb_auto_refresh", value) }
+
     override var wbSyncEndpoint: String
         get() = prefs.getString("wb_sync_endpoint", "") ?: ""
         set(value) = prefs.edit { putString("wb_sync_endpoint", value.trim()) }

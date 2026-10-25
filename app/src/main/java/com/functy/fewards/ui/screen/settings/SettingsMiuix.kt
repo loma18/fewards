@@ -343,6 +343,72 @@ fun SettingPagerMiuix(
                             onCheckedChange = actions.onSetWbMaster
                         )
 
+                        // ===== 签到与成长中心 =====
+                        SwitchPreference(
+                            title = "签到后自动领取成长奖励",
+                            summary = "旅行礼物 / 派 Buddy / 任务 / 断登补签 / 连登兑换 / 开盲盒 / Buddy 盲盒",
+                            checked = uiState.wbGrowthEnabled,
+                            onCheckedChange = actions.onSetWbGrowth,
+                        )
+                        TextButton(
+                            text = if (uiState.wbGrowthBusy) "领取中…" else "一键领取",
+                            onClick = actions.onClaimGrowth,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                            colors = ButtonDefaults.textButtonColorsPrimary(),
+                        )
+                        if (uiState.wbGrowthReport.isNotEmpty()) {
+                            Text(
+                                text = uiState.wbGrowthReport,
+                                fontSize = 11.sp,
+                                color = colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                            )
+                        }
+
+                        // ===== 凭据维护 =====
+                        SwitchPreference(
+                            title = "凭据临期自动刷新",
+                            summary = "access 剩余不足 24 小时、或 refresh 不足 72 小时时自动刷新；默认开启",
+                            checked = uiState.wbAutoRefresh,
+                            onCheckedChange = actions.onSetWbAutoRefresh,
+                        )
+                        if (uiState.wbAccounts.isNotEmpty()) {
+                            uiState.wbAccounts.forEach { acc ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 1.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = acc.label.ifEmpty {
+                                            if (acc.uid.isNotEmpty()) "uid=${acc.uid.take(10)}" else "未命名账号"
+                                        },
+                                        fontSize = 12.sp,
+                                        color = colorScheme.onSurfaceVariantSummary,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text(
+                                        text = wbRemaining(acc),
+                                        fontSize = 12.sp,
+                                        color = colorScheme.onSurfaceVariantSummary,
+                                    )
+                                }
+                            }
+                        }
+                        TextButton(
+                            text = if (uiState.wbCredBusy) "检查中…" else "检查并刷新",
+                            onClick = actions.onCheckRefreshCredentials,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                            colors = ButtonDefaults.textButtonColorsPrimary(),
+                        )
+                        if (uiState.wbCredReport.isNotEmpty()) {
+                            Text(
+                                text = uiState.wbCredReport,
+                                fontSize = 11.sp,
+                                color = colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                            )
+                        }
+
                         WbSyncSection(uiState, actions)
                     }
 
@@ -782,5 +848,21 @@ private fun WbSyncSection(
             color = colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
         )
+    }
+}
+
+/**
+ * 账号剩余有效期。
+ *
+ * `expiresAt` 是**秒**（扫码时 `currentTimeMillis()/1000 + expiresIn`），这里换成毫秒再比。
+ * 0 表示账号里没有这个字段——是"判断不了"，不能当成已过期。
+ */
+private fun wbRemaining(acc: com.functy.fewards.data.repository.AccountRepository.WorkBuddyAccount): String {
+    if (acc.expiresAt <= 0) return "有效期未知"
+    val hours = (acc.expiresAt * 1000 - System.currentTimeMillis()) / 3_600_000.0
+    return when {
+        hours <= 0 -> "已过期"
+        hours < 48 -> "剩余 " + String.format(java.util.Locale.US, "%.1f", hours) + " 小时"
+        else -> "剩余 " + String.format(java.util.Locale.US, "%.1f", hours / 24) + " 天"
     }
 }

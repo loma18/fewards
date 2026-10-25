@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.functy.fewards.core.lansync.LanSyncClient
 import com.functy.fewards.core.lansync.LanSyncProtocol
+import com.functy.fewards.core.workbuddy.WorkBuddyGrowth
 import com.functy.fewards.core.workbuddy.WorkBuddyTokenRefresh
 import com.functy.fewards.data.repository.AccountRepository
 import com.functy.fewards.data.repository.SettingsRepository
@@ -24,6 +25,7 @@ class SettingsViewModel(
     private val accounts: AccountRepository = AccountRepository(),
     private val syncClient: LanSyncClient = LanSyncClient(fewardsApp.okhttpClient),
     private val refresher: WorkBuddyTokenRefresh = WorkBuddyTokenRefresh(fewardsApp.okhttpClient),
+    private val growth: WorkBuddyGrowth = WorkBuddyGrowth(fewardsApp.okhttpClient),
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -77,6 +79,8 @@ class SettingsViewModel(
                     mhyCaptchaApiUrl = repo.mhyCaptchaApiUrl,
                     // WorkBuddy
                     wbMasterEnabled = repo.wbMasterEnabled,
+                    wbGrowthEnabled = repo.wbGrowthEnabled,
+                    wbAutoRefresh = repo.wbAutoRefresh,
                     wbAccounts = wbList,
                     wbSyncSelected = selected,
                     wbSyncEndpoint = repo.wbSyncEndpoint,
@@ -217,6 +221,143 @@ class SettingsViewModel(
     fun setWbMasterEnabled(enabled: Boolean) {
         repo.wbMasterEnabled = enabled
         _uiState.update { it.copy(wbMasterEnabled = enabled) }
+    }
+
+    fun setWbGrowthEnabled(enabled: Boolean) {
+        repo.wbGrowthEnabled = enabled
+        _uiState.update { it.copy(wbGrowthEnabled = enabled) }
+    }
+
+    fun setWbAutoRefresh(enabled: Boolean) {
+        repo.wbAutoRefresh = enabled
+        _uiState.update { it.copy(wbAutoRefresh = enabled) }
+    }
+
+    /**
+     * 一键领取：立即对全部账号跑一遍成长中心。
+     *
+     * 每日签到里也会自动跑（受 [SettingsUiState.wbGrowthEnabled] 控制）；
+     * 这个入口供用户白天随时补领——任务完成后、盲盒次数到账后都可以再收一轮。
+     * 各模块独立失败，一个账号出错不影响其余账号。
+     */
+    fun claimGrowth() {
+        if (_uiState.value.wbGrowthBusy) return
+        viewModelScope.launch {
+            val list = accounts.workBuddyAccounts()
+            if (list.isEmpty()) {
+                _uiState.update { it.copy(wbGrowthReport = "还没有 WorkBuddy 账号，先到账号页扫码或导入") }
+                return@launch
+            }
+            _uiState.update {
+                it.copy(wbGrowthBusy = true, wbGrowthReport = "正在领取 ${list.size} 个账号的成长奖励…")
+            }
+            val lines = ArrayList<String>()
+            var credits = 0
+            var hardFailures = 0
+            for ((index, acc) in list.withIndex()) {
+                val label = acc.label.ifEmpty { acc.uid.take(8).ifEmpty { "账号 ${index + 1}" } }
+                val r = runCatching { growth.run(acc) }.getOrNull()
+                if (r == null) {
+                    lines.add("$label：执行异常")
+                    hardFailures++
+                } else {
+                    credits += r.creditsGained
+                    if (r.hardFailures > 0) hardFailures++
+                    lines.add("$label：${r.report}")
+                }
+                _uiState.update { it.copy(wbGrowthReport = lines.joinToString("\n")) }
+                kotlinx.coroutines.delay(400)
+            }
+            val summary = buildString {
+                append("一键领取完成：${list.size} 个账号")
+                if (credits > 0) append("，共 +$credits 积分")
+                if (hardFailures > 0) append("，$hardFailures 个存在异常")
+            }
+            _uiState.update {
+                it.copy(wbGrowthBusy = false, wbGrowthReport = summary + "\n" + lines.joinToString("\n"))
+            }
+        }
+    }
+
+    /**
+     * 检查并刷新凭据。
+     *
+     * 只刷「临期」账号：access 剩余 < 24 小时，或 refresh 剩余 < 72 小时。
+     * 有效期充足的保持不动——刷新是轮换式的，多刷一次就会顶掉电脑端手里那份。
+     */
+    fun checkAndRefreshCredentials() {
+        if (_uiState.value.wbCredBusy) return
+        viewModelScope.launch {
+            val list = accounts.workBuddyAccounts()
+            if (list.isEmpty()) {
+                _uiState.update { it.copy(wbCredReport = "还没有 WorkBuddy 账号") }
+                return@launch
+            }
+            _uiState.update { it.copy(wbCredBusy = true, wbCredReport = "正在检查 ${list.size} 个账号…") }
+            val lines = ArrayList<String>()
+            var refreshed = 0
+            var skipped = 0
+            var failed = 0
+            val now = System.currentTimeMillis()
+
+            for ((index, acc) in list.withIndex()) {
+                val label = acc.label.ifEmpty { acc.uid.take(8).ifEmpty { "账号 ${index + 1}" } }
+                // expiresAt / refreshExpiresAt 都是「秒」
+                val accessHours = if (acc.expiresAt > 0) (acc.expiresAt * 1000 - now) / 3_600_000.0 else null
+                val refreshHours = if (acc.refreshExpiresAt > 0) (acc.refreshExpiresAt * 1000 - now) / 3_600_000.0 else null
+                val due = (accessHours != null && accessHours < 24) || (refreshHours != null && refreshHours < 72)
+
+                if (!due) {
+                    skipped++
+                    lines.add("$label：${fmtRemaining(accessHours)}，无需刷新")
+                    _uiState.update { it.copy(wbCredReport = lines.joinToString("\n")) }
+                    continue
+                }
+                if (acc.refreshToken.isBlank()) {
+                    failed++
+                    lines.add("$label：已临期但没有 refresh_token，需重新扫码")
+                    _uiState.update { it.copy(wbCredReport = lines.joinToString("\n")) }
+                    continue
+                }
+                val r = runCatching { refresher.refresh(acc.refreshToken, acc.uid) }
+                if (r.isSuccess) {
+                    val t = r.getOrThrow()
+                    accounts.updateWorkBuddyCredential(
+                        uid = acc.uid.ifEmpty { acc.id },
+                        accessToken = t.accessToken,
+                        refreshToken = t.refreshToken.ifEmpty { acc.refreshToken },
+                        expiresAt = if (t.expiresAtMs > 0) t.expiresAtMs / 1000 else acc.expiresAt,
+                        refreshExpiresAt =
+                            if (t.refreshExpiresAtMs > 0) t.refreshExpiresAtMs / 1000 else acc.refreshExpiresAt,
+                        obtainedAt = System.currentTimeMillis(),
+                    )
+                    refreshed++
+                    lines.add("$label：已刷新")
+                } else {
+                    failed++
+                    lines.add("$label：刷新失败（${r.exceptionOrNull()?.message ?: "未知错误"}）")
+                }
+                _uiState.update { it.copy(wbCredReport = lines.joinToString("\n")) }
+                kotlinx.coroutines.delay(350)
+            }
+
+            val summary = buildString {
+                append("检查完成：刷新 $refreshed 个，无需处理 $skipped 个")
+                if (failed > 0) append("，失败 $failed 个")
+            }
+            _uiState.update {
+                it.copy(wbCredBusy = false, wbCredReport = summary + "\n" + lines.joinToString("\n"))
+            }
+            refresh()
+        }
+    }
+
+    /** 剩余有效期 → 人话；null 表示账号里没有这个字段（判断不了，不是已过期） */
+    private fun fmtRemaining(hours: Double?): String = when {
+        hours == null -> "有效期未知"
+        hours <= 0 -> "已过期"
+        hours < 48 -> "剩余 ${String.format(java.util.Locale.US, "%.1f", hours)} 小时"
+        else -> "剩余 ${String.format(java.util.Locale.US, "%.1f", hours / 24)} 天"
     }
 
     // ==================== WorkBuddy 设备同步 ====================

@@ -30,6 +30,15 @@ data class SettingsUiState(
 
     // WorkBuddy
     val wbMasterEnabled: Boolean = true,
+    /** 签到后自动跑成长中心（旅行 / 任务 / 补登 / 兑换 / 盲盒） */
+    val wbGrowthEnabled: Boolean = true,
+    val wbGrowthBusy: Boolean = false,
+    /** 最近一次一键领取的汇总（逐条明细也拼在里面） */
+    val wbGrowthReport: String = "",
+    /** 凭据临期自动刷新 */
+    val wbAutoRefresh: Boolean = true,
+    val wbCredBusy: Boolean = false,
+    val wbCredReport: String = "",
 
     // WorkBuddy 设备同步（与电脑端 workbuddy-console 配对）
     /** 电脑地址，形如 `192.168.1.5:57900` */
@@ -75,6 +84,14 @@ data class SettingsScreenActions(
     val onSetMhyCaptchaApiUrl: (String) -> Unit,
     // WorkBuddy
     val onSetWbMaster: (Boolean) -> Unit,
+    /** 签到后自动跑成长中心 */
+    val onSetWbGrowth: (Boolean) -> Unit,
+    /** 手动「一键领取」：立即跑全部成长中心动作 */
+    val onClaimGrowth: () -> Unit,
+    /** 凭据临期自动刷新开关 */
+    val onSetWbAutoRefresh: (Boolean) -> Unit,
+    /** 「检查并刷新」：对临期账号执行刷新 */
+    val onCheckRefreshCredentials: () -> Unit,
     // WorkBuddy 设备同步
     val onSetWbSyncEndpoint: (String) -> Unit,
     val onSetWbSyncPairCode: (String) -> Unit,
