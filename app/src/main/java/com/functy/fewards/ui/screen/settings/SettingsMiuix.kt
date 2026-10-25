@@ -667,7 +667,13 @@ private fun WbSyncSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "设备同步",
+                text = if (uiState.wbAccounts.isEmpty()) {
+                    "设备同步"
+                } else {
+                    // 把"有几个账号、选中几个"直接写出来，避免列表存在但全未勾选时
+                    // 用户以为"没有可选账号"
+                    "选择要刷新的账号（${uiState.wbSyncSelected.size}/${uiState.wbAccounts.size}）"
+                },
                 fontSize = 13.sp,
                 color = colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.weight(1f),
@@ -743,23 +749,12 @@ private fun WbSyncSection(
             onCheckedChange = actions.onSetWbSyncForcePush,
         )
 
-        Row(
+        TextButton(
+            text = if (uiState.wbSyncBusy) "同步中…" else "同步选中账号",
+            onClick = actions.onSyncWbAccounts,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            TextButton(
-                text = if (uiState.wbSyncBusy) "处理中…" else "刷新选中账号",
-                onClick = actions.onRefreshWbAccounts,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.textButtonColorsPrimary(),
-            )
-            TextButton(
-                text = "推送到电脑",
-                onClick = actions.onPushToDesktop,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.textButtonColorsPrimary(),
-            )
-        }
+            colors = ButtonDefaults.textButtonColorsPrimary(),
+        )
 
         if (uiState.wbSyncStatus.isNotEmpty()) {
             Text(
@@ -781,7 +776,8 @@ private fun WbSyncSection(
         }
 
         Text(
-            text = "刷新和推送要连着做：刷新会换掉 refresh_token，不推送的话电脑端那个账号会失效。",
+            text = "一次点击完成三件事：刷新选中账号的凭据 → 推送到电脑 → 取回电脑端最新凭据。" +
+                "刷新会换掉 refresh_token，所以合并成一个动作，避免刷完忘推导致电脑端账号失效。",
             fontSize = 11.sp,
             color = colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),

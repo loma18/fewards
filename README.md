@@ -90,16 +90,21 @@ WorkBuddy's `refresh_token` is **rotating**: one successful refresh invalidates 
 
 1. On the desktop, open **Settings → 手机同步（局域网）**, turn it on, copy the **address** and **pair code**
 2. On the phone, open **Settings → WorkBuddy → 设备同步**, paste both values
-3. Tick the accounts you want (all ticked by default) → **推送到电脑**
+3. Tick the accounts you want (all ticked by default) → **同步选中账号**
 
-### Two buttons, and the order matters
+### One button, three steps
 
-| Button | What it does | Cost |
-|---|---|---|
-| **刷新选中账号** | Calls the official refresh endpoint with each account's `refresh_token` | Rotates the token — the desktop copy dies immediately |
-| **推送到电脑** | Sends current credentials and writes back what the desktop returns | No token change, safe anytime |
+**同步选中账号** does all of it in one tap:
 
-**Always push right after refreshing.** The UI says so, and it is not a suggestion: the refresh already invalidated the copy the desktop holds.
+| Step | What happens |
+|---|---|
+| 1. Refresh | Calls the official refresh endpoint with each selected account's `refresh_token` |
+| 2. Push | Sends the fresh credentials to the desktop |
+| 3. Pull back | Writes whatever the desktop returns (it may have refreshed some accounts itself) |
+
+Why merged: a refresh **rotates** the token, so the desktop's copy dies the moment the refresh succeeds. With two separate buttons, forgetting the second step silently kills the account on the desktop. Done together, there is no window in between.
+
+If no address / pair code is configured, it degrades to "refresh locally only" and says so in the result line.
 
 ### Notes
 

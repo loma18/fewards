@@ -38,9 +38,23 @@ class SettingsViewModel(
             val wbList = accounts.workBuddyAccounts()
             val allIds = wbList.map { it.id }.toSet()
             _uiState.update { state ->
-                // 首次加载默认全选；之后只做"删掉已不存在账号"的收敛，
-                // 这样用户主动取消勾选（包括全不选）不会被下一次 refresh 覆盖
-                val selected = if (!state.wbSyncSelectionReady) allIds else state.wbSyncSelected intersect allIds
+                /**
+                 * 勾选集合的收敛规则：
+                 * - 首次加载：全选；
+                 * - 之后**新出现的账号自动勾选**（新绑的账号理应默认参与）；
+                 * - 用户主动取消的保持取消；
+                 * - 已删除的账号从集合里移除。
+                 *
+                 * 早先只做 `selected ∩ allIds`，导致"先在设置页待过、再去账号页绑号"时，
+                 * 新账号永远是未勾选状态——列表在，但点「刷新选中账号」一个都选不上。
+                 */
+                val prevIds = state.wbAccounts.map { it.id }.toSet()
+                val newlyAdded = allIds - prevIds
+                val selected = if (!state.wbSyncSelectionReady) {
+                    allIds
+                } else {
+                    (state.wbSyncSelected + newlyAdded) intersect allIds
+                }
                 state.copy(
                     wbSyncSelectionReady = true,
                     themeMode = repo.themeMode,
@@ -238,186 +252,216 @@ class SettingsViewModel(
     }
 
     /**
-     * 刷新选中的账号。
+     * 一键同步选中账号：**刷新 → 推送 → 取回**。
      *
-     * 刷新会**轮换 refresh_token**：成功后旧值立刻作废，电脑端若持有同一账号的副本会失效。
-     * 所以刷新前先拉一次电脑端的待回传队列（确保拿到的是最新凭据），刷新后提示用户尽快推送。
+     * 为什么合并成一个按钮：refresh_token 是轮换式的，刷新成功后电脑端手里的旧值立刻作废。
+     * 之前「刷新」和「推送」是两个按钮，刷完忘了推，电脑端那个账号就静默失效了。
+     * 现在一次点击走完整条链路，中间不留"刷了但没推"的窗口。
+     *
+     * 没配电脑地址 / 配对码时退化成"只刷新本地"，并在结果里说明原因。
      */
-    fun refreshWbAccounts() {
-        val state = _uiState.value
-        if (state.wbSyncBusy) return
-        val targets = state.wbAccounts.filter { it.id in state.wbSyncSelected }
-        if (targets.isEmpty()) {
-            _uiState.update { it.copy(wbSyncStatus = "请先勾选要刷新的账号") }
-            return
-        }
+    fun syncSelectedAccounts() {
+        if (_uiState.value.wbSyncBusy) return
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    wbSyncBusy = true,
-                    wbSyncStatus = "正在刷新 ${targets.size} 个账号…",
-                    wbSyncResults = emptyMap(),
-                )
+            val outcome = refreshSelectedInternal() ?: return@launch
+            val prefix = buildString {
+                append("已刷新 ${outcome.ok} 个")
+                if (outcome.failed > 0) append("（失败 ${outcome.failed}）")
+                append("；")
             }
-            // 尽力先对齐电脑端：失败不影响刷新（可能用户本来就没配同步）
-            runCatching { pullPendingInternal() }
-
-            val results = LinkedHashMap<String, String>()
-            var ok = 0
-            var failed = 0
-            for (acc in targets) {
-                // 每个账号都重新读盘：上一个账号刷新可能改了列表
-                val current = accounts.workBuddyAccounts().firstOrNull { it.id == acc.id } ?: acc
-                val message = try {
-                    if (current.refreshToken.isBlank()) {
-                        failed++
-                        "没有 refresh_token，需重新扫码"
-                    } else {
-                        val r = refresher.refresh(current.refreshToken, current.uid)
-                        val newRefresh = r.refreshToken.ifEmpty { current.refreshToken }
-                        val expSec = if (r.expiresAtMs > 0) r.expiresAtMs / 1000 else current.expiresAt
-                        val refreshExpSec =
-                            if (r.refreshExpiresAtMs > 0) r.refreshExpiresAtMs / 1000 else current.refreshExpiresAt
-                        val written = accounts.updateWorkBuddyCredential(
-                            uid = current.uid.ifEmpty { current.id },
-                            accessToken = r.accessToken,
-                            refreshToken = newRefresh,
-                            expiresAt = expSec,
-                            refreshExpiresAt = refreshExpSec,
-                            obtainedAt = System.currentTimeMillis(),
-                        )
-                        if (written) {
-                            ok++
-                            "已刷新"
-                        } else {
-                            failed++
-                            "本机已找不到该账号"
-                        }
-                    }
-                } catch (e: Exception) {
-                    failed++
-                    e.message ?: "刷新失败"
-                }
-                results[acc.id] = message
-                _uiState.update {
-                    it.copy(
-                        wbSyncResults = results.toMap(),
-                        wbSyncStatus = "刷新中 ${results.size}/${targets.size}…",
-                    )
-                }
-                // 与电脑端一致的小间隔：连续打官方刷新接口容易触发风控
-                kotlinx.coroutines.delay(350)
-            }
-            _uiState.update {
-                it.copy(
-                    wbSyncBusy = false,
-                    wbSyncResults = results,
-                    wbSyncStatus = buildString {
-                        append("刷新完成：成功 $ok")
-                        if (failed > 0) append("，失败 $failed")
-                        if (ok > 0 && repo.wbSyncEndpoint.isNotBlank()) append("。已轮换 refresh_token，请尽快推送，否则电脑端该账号会失效")
-                    },
-                )
-            }
-            refresh()
+            pushInternal(prefix)
         }
     }
 
+    /** 一次刷新的结果 */
+    private data class RefreshOutcome(val ok: Int, val failed: Int)
+
     /**
-     * 推送当前凭据到电脑端，并把电脑端回传的最新凭据写回本地。
+     * 刷新选中账号（内部实现）。
      *
-     * 一次往返完成双向对齐：推送 → 电脑端裁决/刷新 → 回传 → 本地覆盖。
+     * @return null 表示前置校验没过（没勾选 / 没有账号），提示已写入状态
      */
-    fun pushToDesktop() {
+    private suspend fun refreshSelectedInternal(): RefreshOutcome? {
         val state = _uiState.value
-        if (state.wbSyncBusy) return
+        val targets = state.wbAccounts.filter { it.id in state.wbSyncSelected }
+        if (targets.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    wbSyncStatus = if (state.wbAccounts.isEmpty()) {
+                        "还没有 WorkBuddy 账号，先到账号页扫码或导入"
+                    } else {
+                        "请先勾选要同步的账号（当前 0/${state.wbAccounts.size}）"
+                    },
+                )
+            }
+            return null
+        }
+
+        _uiState.update {
+            it.copy(
+                wbSyncBusy = true,
+                wbSyncStatus = "正在刷新 ${targets.size} 个账号…",
+                wbSyncResults = emptyMap(),
+            )
+        }
+        // 尽力先取回电脑端刷新过的凭据，避免拿旧 token 去刷（失败不影响刷新）
+        runCatching { pullPendingInternal() }
+
+        val results = LinkedHashMap<String, String>()
+        var ok = 0
+        var failed = 0
+        for (acc in targets) {
+            // 每个账号都重新读盘：上一个账号刷新可能改了列表
+            val current = accounts.workBuddyAccounts().firstOrNull { it.id == acc.id } ?: acc
+            val message = try {
+                if (current.refreshToken.isBlank()) {
+                    failed++
+                    "没有 refresh_token，需重新扫码"
+                } else {
+                    val r = refresher.refresh(current.refreshToken, current.uid)
+                    val newRefresh = r.refreshToken.ifEmpty { current.refreshToken }
+                    val expSec = if (r.expiresAtMs > 0) r.expiresAtMs / 1000 else current.expiresAt
+                    val refreshExpSec =
+                        if (r.refreshExpiresAtMs > 0) r.refreshExpiresAtMs / 1000 else current.refreshExpiresAt
+                    val written = accounts.updateWorkBuddyCredential(
+                        uid = current.uid.ifEmpty { current.id },
+                        accessToken = r.accessToken,
+                        refreshToken = newRefresh,
+                        expiresAt = expSec,
+                        refreshExpiresAt = refreshExpSec,
+                        obtainedAt = System.currentTimeMillis(),
+                    )
+                    if (written) {
+                        ok++
+                        "已刷新"
+                    } else {
+                        failed++
+                        "本机已找不到该账号"
+                    }
+                }
+            } catch (e: Exception) {
+                failed++
+                e.message ?: "刷新失败"
+            }
+            results[acc.id] = message
+            _uiState.update {
+                it.copy(
+                    wbSyncResults = results.toMap(),
+                    wbSyncStatus = "刷新中 ${results.size}/${targets.size}…",
+                )
+            }
+            // 与电脑端一致的小间隔：连续打官方刷新接口容易触发风控
+            kotlinx.coroutines.delay(350)
+        }
+        _uiState.update { it.copy(wbSyncResults = results) }
+        return RefreshOutcome(ok, failed)
+    }
+
+    /**
+     * 推送到电脑端并回写电脑端返回的最新凭据（内部实现）。
+     *
+     * @param prefix 结果前缀，合并模式下用来带上"已刷新 N 个"
+     * @return 是否成功；失败时状态里已有可读原因
+     */
+    private suspend fun pushInternal(prefix: String = ""): Boolean {
+        val state = _uiState.value
         val endpoint = try {
             LanSyncProtocol.parseEndpoint(state.wbSyncEndpoint)
         } catch (e: Exception) {
-            _uiState.update { it.copy(wbSyncStatus = e.message ?: "地址不正确") }
-            return
+            _uiState.update {
+                it.copy(
+                    wbSyncBusy = false,
+                    wbSyncStatus = prefix + (e.message ?: "电脑地址不正确") + "，仅刷新了本地",
+                )
+            }
+            return false
         }
         if (state.wbSyncPairCode.isBlank()) {
-            _uiState.update { it.copy(wbSyncStatus = "请先填写电脑端设置页显示的配对码") }
-            return
+            _uiState.update { it.copy(wbSyncBusy = false, wbSyncStatus = prefix + "未填配对码，仅刷新了本地") }
+            return false
         }
-        val list = accounts.workBuddyAccounts()
+        // 只推勾选的账号：未勾选的不该被这次操作带着一起改
+        val list = accounts.workBuddyAccounts().filter { it.id in state.wbSyncSelected }
         if (list.isEmpty()) {
-            _uiState.update { it.copy(wbSyncStatus = "本机还没有 WorkBuddy 账号") }
-            return
+            _uiState.update { it.copy(wbSyncBusy = false, wbSyncStatus = prefix + "没有勾选可推送的账号") }
+            return false
         }
-        viewModelScope.launch {
-            _uiState.update { it.copy(wbSyncBusy = true, wbSyncStatus = "正在推送到 ${endpoint.display}…") }
-            try {
-                val payloads = list.map {
-                    LanSyncProtocol.Payload(
-                        uid = it.uid.ifEmpty { it.id },
-                        label = it.label,
-                        enterpriseId = it.enterpriseId,
-                        accessToken = it.token,
-                        refreshToken = it.refreshToken,
-                        expiresAt = it.expiresAt,
-                        obtainedAt = it.obtainedAt,
-                    )
-                }
-                val resp = syncClient.push(
-                    endpoint = endpoint,
-                    pairCode = state.wbSyncPairCode,
-                    accounts = payloads,
-                    deviceName = deviceName(),
-                    force = state.wbSyncForcePush,
+
+        _uiState.update { it.copy(wbSyncBusy = true, wbSyncStatus = prefix + "正在推送到 ${endpoint.display}…") }
+        return try {
+            val payloads = list.map {
+                LanSyncProtocol.Payload(
+                    uid = it.uid.ifEmpty { it.id },
+                    label = it.label,
+                    enterpriseId = it.enterpriseId,
+                    accessToken = it.token,
+                    refreshToken = it.refreshToken,
+                    expiresAt = it.expiresAt,
+                    obtainedAt = it.obtainedAt,
                 )
-
-                var written = 0
-                val perAccount = LinkedHashMap<String, String>()
-                resp.results.forEach { r ->
-                    val acc = r.account
-                    if (acc == null || (acc.token.isEmpty() && acc.refreshToken.isEmpty())) {
-                        perAccount[r.uid] = describe(r.action)
-                        return@forEach
-                    }
-                    val ok = accounts.updateWorkBuddyCredential(
-                        uid = acc.uid.ifEmpty { r.uid },
-                        accessToken = acc.token,
-                        refreshToken = acc.refreshToken,
-                        expiresAt = acc.expiresAt,
-                        refreshExpiresAt = acc.refreshExpiresAt,
-                        obtainedAt = if (r.action == "keep-local" || r.action == "same") 0L else System.currentTimeMillis(),
-                        syncVersion = acc.version,
-                    )
-                    if (ok) written++
-                    perAccount[acc.uid.ifEmpty { r.uid }] = buildString {
-                        append(describe(r.action))
-                        if (r.message.isNotBlank()) append("：").append(r.message)
-                        if (r.risk.isNotBlank()) append("（").append(r.risk).append("）")
-                    }
-                }
-
-                // 推送过程中电脑端可能刚刷新过（入队），再拉一次把最新值取回
-                val pulled = runCatching { pullPendingInternal() }.getOrDefault(0)
-
-                val now = System.currentTimeMillis()
-                repo.wbSyncLastAt = now
-                _uiState.update {
-                    it.copy(
-                        wbSyncBusy = false,
-                        wbSyncLastAt = now,
-                        wbSyncResults = perAccount,
-                        wbSyncStatus = "同步完成：回写 $written 个" +
-                            if (pulled > 0) "，取回 $pulled 个电脑端刷新结果" else "",
-                    )
-                }
-                refresh()
-            } catch (e: IOException) {
-                _uiState.update {
-                    it.copy(
-                        wbSyncBusy = false,
-                        wbSyncStatus = "连不上电脑（${e.message}）：确认手机与电脑在同一 Wi-Fi，地址端口正确，且电脑端已开启同步",
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(wbSyncBusy = false, wbSyncStatus = e.message ?: "同步失败") }
             }
+            val resp = syncClient.push(
+                endpoint = endpoint,
+                pairCode = state.wbSyncPairCode,
+                accounts = payloads,
+                deviceName = deviceName(),
+                force = state.wbSyncForcePush,
+            )
+
+            var written = 0
+            val perAccount = LinkedHashMap<String, String>()
+            resp.results.forEach { r ->
+                val acc = r.account
+                if (acc == null || (acc.token.isEmpty() && acc.refreshToken.isEmpty())) {
+                    perAccount[r.uid] = describe(r.action)
+                    return@forEach
+                }
+                val ok = accounts.updateWorkBuddyCredential(
+                    uid = acc.uid.ifEmpty { r.uid },
+                    accessToken = acc.token,
+                    refreshToken = acc.refreshToken,
+                    expiresAt = acc.expiresAt,
+                    refreshExpiresAt = acc.refreshExpiresAt,
+                    obtainedAt = if (r.action == "keep-local" || r.action == "same") 0L else System.currentTimeMillis(),
+                    syncVersion = acc.version,
+                )
+                if (ok) written++
+                perAccount[acc.uid.ifEmpty { r.uid }] = buildString {
+                    append(describe(r.action))
+                    if (r.message.isNotBlank()) append("：").append(r.message)
+                    if (r.risk.isNotBlank()) append("（").append(r.risk).append("）")
+                }
+            }
+
+            // 推送过程中电脑端可能刚刷新过（入队），再拉一次把最新值取回
+            val pulled = runCatching { pullPendingInternal() }.getOrDefault(0)
+
+            val now = System.currentTimeMillis()
+            repo.wbSyncLastAt = now
+            _uiState.update {
+                it.copy(
+                    wbSyncBusy = false,
+                    wbSyncLastAt = now,
+                    wbSyncResults = perAccount,
+                    wbSyncStatus = prefix + "已同步 $written 个" +
+                        if (pulled > 0) "，并取回 $pulled 个电脑端刷新结果" else "",
+                )
+            }
+            refresh()
+            true
+        } catch (e: IOException) {
+            _uiState.update {
+                it.copy(
+                    wbSyncBusy = false,
+                    wbSyncStatus = prefix + "连不上电脑（${e.message}）：确认同一 Wi-Fi、地址端口正确、电脑端已开启同步",
+                )
+            }
+            false
+        } catch (e: Exception) {
+            _uiState.update {
+                it.copy(wbSyncBusy = false, wbSyncStatus = prefix + (e.message ?: "推送失败"))
+            }
+            false
         }
     }
 

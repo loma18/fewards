@@ -81,10 +81,8 @@ data class SettingsScreenActions(
     val onSetWbSyncForcePush: (Boolean) -> Unit,
     val onToggleWbSyncAccount: (String, Boolean) -> Unit,
     val onSelectAllWbSync: (Boolean) -> Unit,
-    /** 刷新手机端选中的账号（会轮换 refresh_token） */
-    val onRefreshWbAccounts: () -> Unit,
-    /** 把当前凭据推送到电脑端，并取回电脑端最新凭据 */
-    val onPushToDesktop: () -> Unit,
+    /** 一键同步选中账号：刷新 → 推送 → 取回（刷新会轮换 refresh_token） */
+    val onSyncWbAccounts: () -> Unit,
     // Bing
     val onSetBingMaster: (Boolean) -> Unit,
     val onSetBingAppCheckIn: (Boolean) -> Unit,
