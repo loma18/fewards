@@ -32,6 +32,14 @@ interface SettingsRepository {
 
     // WorkBuddy
     var wbMasterEnabled: Boolean
+    /** 电脑端同步地址，形如 `192.168.1.5:57900`；空 = 未配置 */
+    var wbSyncEndpoint: String
+    /** 与电脑端一致的配对码 */
+    var wbSyncPairCode: String
+    /** true = 以手机为准覆盖电脑端（默认 false，走"谁新信谁"） */
+    var wbSyncForcePush: Boolean
+    /** 上次成功同步的时间（毫秒），仅用于界面展示 */
+    var wbSyncLastAt: Long
 
     // Bing
     var bingMasterEnabled: Boolean

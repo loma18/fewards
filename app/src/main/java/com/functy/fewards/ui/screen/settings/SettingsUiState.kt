@@ -31,6 +31,25 @@ data class SettingsUiState(
     // WorkBuddy
     val wbMasterEnabled: Boolean = true,
 
+    // WorkBuddy 设备同步（与电脑端 workbuddy-console 配对）
+    /** 电脑地址，形如 `192.168.1.5:57900` */
+    val wbSyncEndpoint: String = "",
+    val wbSyncPairCode: String = "",
+    /** true = 以手机为准覆盖电脑端；默认 false 走"谁新信谁" */
+    val wbSyncForcePush: Boolean = false,
+    val wbSyncLastAt: Long = 0L,
+    val wbSyncBusy: Boolean = false,
+    /** 一句话状态：正在做什么 / 失败原因 / 结果汇总 */
+    val wbSyncStatus: String = "",
+    /** 账号 id → 该账号最近一次刷新或同步的结果 */
+    val wbSyncResults: Map<String, String> = emptyMap(),
+    /** 参与刷新的账号 id（默认全选；账号增删后由 ViewModel 补齐） */
+    val wbSyncSelected: Set<String> = emptySet(),
+    /** 勾选集合是否初始化过：false 时 refresh 会执行"默认全选" */
+    val wbSyncSelectionReady: Boolean = false,
+    /** WorkBuddy 账号列表（设置页要展示勾选清单） */
+    val wbAccounts: List<com.functy.fewards.data.repository.AccountRepository.WorkBuddyAccount> = emptyList(),
+
     // Bing
     val bingMasterEnabled: Boolean = true,
     val bingAppCheckIn: Boolean = true,
@@ -56,6 +75,16 @@ data class SettingsScreenActions(
     val onSetMhyCaptchaApiUrl: (String) -> Unit,
     // WorkBuddy
     val onSetWbMaster: (Boolean) -> Unit,
+    // WorkBuddy 设备同步
+    val onSetWbSyncEndpoint: (String) -> Unit,
+    val onSetWbSyncPairCode: (String) -> Unit,
+    val onSetWbSyncForcePush: (Boolean) -> Unit,
+    val onToggleWbSyncAccount: (String, Boolean) -> Unit,
+    val onSelectAllWbSync: (Boolean) -> Unit,
+    /** 刷新手机端选中的账号（会轮换 refresh_token） */
+    val onRefreshWbAccounts: () -> Unit,
+    /** 把当前凭据推送到电脑端，并取回电脑端最新凭据 */
+    val onPushToDesktop: () -> Unit,
     // Bing
     val onSetBingMaster: (Boolean) -> Unit,
     val onSetBingAppCheckIn: (Boolean) -> Unit,

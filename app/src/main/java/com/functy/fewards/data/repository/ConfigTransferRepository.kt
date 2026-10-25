@@ -47,6 +47,7 @@ class ConfigTransferRepository(
                     .put("enterpriseId", a.enterpriseId)
                     .put("refreshToken", a.refreshToken)
                     .put("expiresAt", a.expiresAt)
+                    .put("obtainedAt", a.obtainedAt)
             )
         }
         root.put("workbuddies", wbArr)
@@ -98,6 +99,8 @@ class ConfigTransferRepository(
                     enterpriseId = d.enterpriseId,
                     refreshToken = d.refreshToken,
                     expiresAt = d.expiresAt,
+                    // 导入即视为"刚拿到"：否则同步时电脑端会把这份当成来路不明的旧凭据
+                    obtainedAt = System.currentTimeMillis(),
                 )
             )
         }

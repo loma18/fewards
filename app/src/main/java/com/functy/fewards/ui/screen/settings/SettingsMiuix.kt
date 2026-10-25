@@ -1,5 +1,8 @@
 package com.functy.fewards.ui.screen.settings
 
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -339,6 +342,8 @@ fun SettingPagerMiuix(
                             checked = uiState.wbMasterEnabled,
                             onCheckedChange = actions.onSetWbMaster
                         )
+
+                        WbSyncSection(uiState, actions)
                     }
 
                     // ==================== Bing ====================
@@ -637,4 +642,149 @@ private fun OverviewHoldCustomDialog(
             }
         },
     )
+}
+
+/**
+ * WorkBuddy 设备同步区块（嵌在 WorkBuddy 卡片里）。
+ *
+ * 两个动作刻意分开，因为它们的代价完全不同：
+ * - **刷新**会轮换 refresh_token，刷完电脑端那份立刻失效，必须紧接着推送；
+ * - **推送**只搬运凭据，不改变任何 token，随时可以点。
+ *
+ * 所以"刷新"后面带一句提醒，"推送"不做任何前置要求。
+ */
+@Composable
+private fun WbSyncSection(
+    uiState: SettingsUiState,
+    actions: SettingsScreenActions,
+) {
+    val allSelected =
+        uiState.wbAccounts.isNotEmpty() && uiState.wbSyncSelected.size >= uiState.wbAccounts.size
+
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "设备同步",
+                fontSize = 13.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.weight(1f),
+            )
+            if (uiState.wbAccounts.isNotEmpty()) {
+                Text(
+                    text = if (allSelected) "全不选" else "全选",
+                    fontSize = 13.sp,
+                    color = colorScheme.primary,
+                    modifier = Modifier.clickable { actions.onSelectAllWbSync(!allSelected) },
+                )
+            }
+        }
+
+        if (uiState.wbAccounts.isEmpty()) {
+            Text(
+                text = "还没有 WorkBuddy 账号，先到账号页扫码添加。",
+                fontSize = 12.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+
+        uiState.wbAccounts.forEach { acc ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(
+                    checked = acc.id in uiState.wbSyncSelected,
+                    onCheckedChange = { actions.onToggleWbSyncAccount(acc.id, it) },
+                    colors = CheckboxDefaults.colors(checkedColor = colorScheme.primary),
+                )
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text(
+                        text = acc.label.ifEmpty {
+                            if (acc.uid.isNotEmpty()) "uid=${acc.uid.take(10)}" else "未命名账号"
+                        },
+                        fontSize = 14.sp,
+                        color = colorScheme.onBackground,
+                    )
+                    val note = uiState.wbSyncResults[acc.id]
+                    if (!note.isNullOrEmpty()) {
+                        Text(
+                            text = note,
+                            fontSize = 11.sp,
+                            color = colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                }
+            }
+        }
+
+        MultilineInputField(
+            value = uiState.wbSyncEndpoint,
+            onValueChange = actions.onSetWbSyncEndpoint,
+            label = "电脑地址（192.168.1.5:57900）",
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        MultilineInputField(
+            value = uiState.wbSyncPairCode,
+            onValueChange = actions.onSetWbSyncPairCode,
+            label = "配对码（电脑端设置页显示）",
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+
+        SwitchPreference(
+            title = "以手机为准",
+            summary = "开启后把手机凭据强制写入电脑端；电脑正在登录的那个账号仍会被保护，不会被覆盖。",
+            checked = uiState.wbSyncForcePush,
+            onCheckedChange = actions.onSetWbSyncForcePush,
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            TextButton(
+                text = if (uiState.wbSyncBusy) "处理中…" else "刷新选中账号",
+                onClick = actions.onRefreshWbAccounts,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+            TextButton(
+                text = "推送到电脑",
+                onClick = actions.onPushToDesktop,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+        }
+
+        if (uiState.wbSyncStatus.isNotEmpty()) {
+            Text(
+                text = uiState.wbSyncStatus,
+                fontSize = 12.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+            )
+        }
+
+        if (uiState.wbSyncLastAt > 0) {
+            Text(
+                text = "上次同步：" + java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.US)
+                    .format(java.util.Date(uiState.wbSyncLastAt)),
+                fontSize = 11.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+            )
+        }
+
+        Text(
+            text = "刷新和推送要连着做：刷新会换掉 refresh_token，不推送的话电脑端那个账号会失效。",
+            fontSize = 11.sp,
+            color = colorScheme.onSurfaceVariantSummary,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        )
+    }
 }

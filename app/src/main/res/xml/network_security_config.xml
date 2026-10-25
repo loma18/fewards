@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  局域网同步需要明文 HTTP。
+
+  手机 → 电脑走的是家里 Wi-Fi 上的私有地址（192.168.x.x / 10.x.x.x），既没有证书，
+  也不该为了内网通信去买域名。Android 9+ 默认禁止 cleartext，不放开的话
+  请求会直接抛 "CLEARTEXT communication not permitted"，表现为"连不上电脑"。
+
+  ⚠️ 这里只放开 cleartext，**没有**降低任何证书校验：
+  - trust-anchors 仍然是系统证书；
+  - 应用侧在 LanSyncProtocol.isPrivateHost() 里限制了只能填私有网段，
+    公网 IP / 域名一律拒绝，避免把长期凭据发到外网。
+
+  如果以后要支持公网中继，应改为 HTTPS，并把这里收紧成白名单域名。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

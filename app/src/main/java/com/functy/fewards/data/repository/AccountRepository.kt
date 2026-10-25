@@ -82,6 +82,10 @@ class AccountRepository {
     /**
      * WorkBuddy 账号。扫码授权会一并带出 uid / enterpriseId / refreshToken / expiresAt；
      * 手动粘贴 token 时这些字段可能为空，引擎只依赖 [token]。
+     *
+     * 时间单位**不统一**，这是历史遗留、也是同步时最容易踩的坑：
+     * - [expiresAt] 是**秒**（扫码时 `currentTimeMillis()/1000 + expiresIn`）；
+     * - [obtainedAt] / [refreshedAt] 是**毫秒**，用于判断"这份凭据有多新"。
      */
     data class WorkBuddyAccount(
         val id: String,
@@ -91,7 +95,14 @@ class AccountRepository {
         val uid: String = "",
         val enterpriseId: String = "",
         val refreshToken: String = "",
+        /** 秒 */
         val expiresAt: Long = 0L,
+        /** 毫秒：这份凭据是什么时候拿到的（扫码 / 导入 / 刷新）。0 = 未知（老数据） */
+        val obtainedAt: Long = 0L,
+        /** 秒：refresh_token 的过期时间，电脑端回传；0 = 未知 */
+        val refreshExpiresAt: Long = 0L,
+        /** 电脑端维护的同步版本；a 只记录用于展示与回传 */
+        val syncVersion: Long = 0L,
     )
 
     fun workBuddyAccounts(): List<WorkBuddyAccount> {
@@ -109,6 +120,9 @@ class AccountRepository {
                     enterpriseId = o.optString("enterpriseId"),
                     refreshToken = o.optString("refreshToken"),
                     expiresAt = o.optLong("expiresAt"),
+                    obtainedAt = o.optLong("obtainedAt"),
+                    refreshExpiresAt = o.optLong("refreshExpiresAt"),
+                    syncVersion = o.optLong("syncVersion"),
                 )
             }
         }.getOrDefault(emptyList())
@@ -138,6 +152,45 @@ class AccountRepository {
         saveWorkBuddy(workBuddyAccounts().filter { it.id != id })
     }
 
+    /**
+     * 局部更新凭据（刷新 / 同步回写专用）。
+     *
+     * 只动凭据相关字段，**保留** label / avatarUrl / enterpriseId ——
+     * 电脑端回传的是瘦数据，不能让它把本机头像和备注抹掉。
+     *
+     * 空值不覆盖：电脑端对加密信封账号会回传空 token，直接写会把有效凭据清空。
+     *
+     * @return true 表示找到并写入了；false 表示本机没有这个账号
+     */
+    fun updateWorkBuddyCredential(
+        uid: String,
+        accessToken: String,
+        refreshToken: String,
+        /** 秒 */
+        expiresAt: Long,
+        /** 秒 */
+        refreshExpiresAt: Long = 0L,
+        /** 毫秒 */
+        obtainedAt: Long = System.currentTimeMillis(),
+        syncVersion: Long = 0L,
+    ): Boolean {
+        if (uid.isEmpty()) return false
+        val list = workBuddyAccounts().toMutableList()
+        val index = list.indexOfFirst { it.uid == uid || it.id == uid }
+        if (index < 0) return false
+        val old = list[index]
+        list[index] = old.copy(
+            token = accessToken.ifEmpty { old.token },
+            refreshToken = refreshToken.ifEmpty { old.refreshToken },
+            expiresAt = if (expiresAt > 0) expiresAt else old.expiresAt,
+            refreshExpiresAt = if (refreshExpiresAt > 0) refreshExpiresAt else old.refreshExpiresAt,
+            obtainedAt = if (obtainedAt > 0) obtainedAt else old.obtainedAt,
+            syncVersion = if (syncVersion > 0) syncVersion else old.syncVersion,
+        )
+        saveWorkBuddy(list)
+        return true
+    }
+
     private fun saveWorkBuddy(list: List<WorkBuddyAccount>) {
         val arr = JSONArray()
         list.forEach { a ->
@@ -151,6 +204,9 @@ class AccountRepository {
                     .put("enterpriseId", a.enterpriseId)
                     .put("refreshToken", a.refreshToken)
                     .put("expiresAt", a.expiresAt)
+                    .put("obtainedAt", a.obtainedAt)
+                    .put("refreshExpiresAt", a.refreshExpiresAt)
+                    .put("syncVersion", a.syncVersion)
             )
         }
         prefs.edit { putString("sec.wb.accounts", arr.toString()) }

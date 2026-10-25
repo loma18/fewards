@@ -200,6 +200,8 @@ class AccountViewModel : ViewModel() {
                         enterpriseId = result.enterpriseId,
                         refreshToken = result.refreshToken,
                         expiresAt = result.expiresAt,
+                        // 记录"这份凭据是什么时候拿到的"，同步时电脑端要靠它判断新旧
+                        obtainedAt = System.currentTimeMillis(),
                     )
                 )
                 AppLog.i("WB", "账号 ${result.nickname} 扫码授权成功${if (existed) "（已更新）" else ""}")
@@ -245,6 +247,7 @@ class AccountViewModel : ViewModel() {
                 avatarUrl = profile.avatarUrl.orEmpty(),
                 uid = uid,
                 expiresAt = profile.expiresAt,
+                obtainedAt = System.currentTimeMillis(),
             )
         )
         AppLog.i("WB", "WorkBuddy token 导入成功")

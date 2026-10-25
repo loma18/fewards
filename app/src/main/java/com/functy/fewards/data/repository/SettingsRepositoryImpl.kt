@@ -110,6 +110,22 @@ class SettingsRepositoryImpl : SettingsRepository {
         get() = prefs.getBoolean("wb_master_enabled", true)
         set(value) = prefs.edit { putBoolean("wb_master_enabled", value) }
 
+    override var wbSyncEndpoint: String
+        get() = prefs.getString("wb_sync_endpoint", "") ?: ""
+        set(value) = prefs.edit { putString("wb_sync_endpoint", value.trim()) }
+
+    override var wbSyncPairCode: String
+        get() = prefs.getString("wb_sync_pair_code", "") ?: ""
+        set(value) = prefs.edit { putString("wb_sync_pair_code", value.trim()) }
+
+    override var wbSyncForcePush: Boolean
+        get() = prefs.getBoolean("wb_sync_force_push", false)
+        set(value) = prefs.edit { putBoolean("wb_sync_force_push", value) }
+
+    override var wbSyncLastAt: Long
+        get() = prefs.getLong("wb_sync_last_at", 0L)
+        set(value) = prefs.edit { putLong("wb_sync_last_at", value) }
+
     override var bingMasterEnabled: Boolean
         get() = prefs.getBoolean("bing_master_enabled", true)
         set(value) = prefs.edit { putBoolean("bing_master_enabled", value) }
