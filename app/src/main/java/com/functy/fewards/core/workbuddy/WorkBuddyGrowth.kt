@@ -289,6 +289,19 @@ class WorkBuddyGrowth(private val client: OkHttpClient) {
         if (account.token.isBlank()) {
             return GrowthResult(false, "该账号没有可用的 access_token", emptyList(), 0, null, null, 0, 0, false)
         }
+        /**
+         * 成长中心只在官网域（国内版 `www.codebuddy.cn/v2/activity/growth`）上，
+         * 国际版没有这套活动接口。按"跳过"返回，不计入失败——否则每次一键领取都会
+         * 在国际版账号上挂一条修不好的红字。
+         */
+        val variant = WorkBuddyVariant.ofAccount(account)
+        if (!variant.supportsGrowth) {
+            return GrowthResult(
+                false,
+                "${variant.label}（${variant.appLabel}）暂无成长中心，已跳过",
+                emptyList(), 0, null, null, 0, 0, false,
+            )
+        }
 
         val parts = ArrayList<String>()
         var credits = 0

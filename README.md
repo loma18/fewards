@@ -61,6 +61,7 @@ Download the latest `Fewards-<version>-release.apk` (release + R8) from [Release
 | **Credits** | Per-account balance and package expiry, plus a dashboard on the Accounts tab: **total usable credits**, and how much expires **within 3 / 5 days** (per account too) |
 | **Credential upkeep** | Optional auto-refresh of near-expiry tokens, with a "Check & refresh" action and per-account time-to-live |
 | **Device sync** | Pairs with the desktop console over LAN: refresh → push → pull back, so both sides always share one refresh-token chain |
+| **Two editions** | 国内版 (WorkBuddy) and 国际版 (WorkBuddy AI) are two separate clients with two separate domains — accounts are stored, displayed and requested per edition, and credentials are never mixed |
 
 - **Multiple accounts** — re-authorizing the same account updates it instead of adding a new one
 - **One pipeline** — the home screen's "Start" button and the Control Center "check-in" tile run the same flow, with live progress notifications while it runs
@@ -72,7 +73,7 @@ Download the latest `Fewards-<version>-release.apk` (release + R8) from [Release
 
 ## Usage
 
-1. **Accounts** — tap "+" in the top-right corner and scan with WeChat / QQ, or paste the desktop accessToken. The account row shows its remaining credits and how much expires within 3 / 5 days; the star button opens the per-package credit details
+1. **Accounts** — tap "+" in the top-right corner, pick the edition (国内版 / 国际版), then scan with WeChat / QQ or paste the desktop accessToken. Accounts are **grouped by edition** with one credit summary per edition; the row shows remaining credits and how much expires within 3 / 5 days, and the star button opens the per-package details
 2. **Settings** — toggle the growth center, credential auto-refresh, device sync, notifications and the completion overview
 3. **Home** — keep WorkBuddy ticked → Start
 
@@ -109,6 +110,16 @@ WorkBuddy's `refresh_token` is **rotating**: one successful refresh invalidates 
 Why refresh is a separate button: a refresh **rotates** the token, so the desktop's copy dies the moment it succeeds. Merging refresh into the sync button meant every "just push what I have" click also cost a rotation. Split apart, each button does exactly one thing — just remember that after a refresh the desktop holds a dead copy until you push.
 
 **从电脑同步凭据** has four hard rules: the desktop's credential must still be valid, accounts still valid on the phone are left alone, only token data (access / refresh / both expiries) is written for existing accounts, and encrypted-envelope accounts are skipped (no plaintext to copy).
+
+### 国内版 / 国际版 (WorkBuddy / WorkBuddy AI)
+
+The two editions are **two separate clients** with two separate domains, login-state files and processes, so a 国际版 token sent to the 国内版 domain only gets a 401 (it looks like "invalid credential", but it is actually the wrong endpoint). Fewards therefore keeps them apart everywhere:
+
+- **Stored per account** — the account record carries `variant` (`cn` / `ai`); records saved before this existed are read as 国内版, so nothing has to migrate.
+- **Requested per edition** — credits use `apiEndpoint`, refresh uses `chatBase` plus matching `Origin` / `Referer` / User-Agent, and QR login uses the edition's own domain and platform parameter.
+- **Displayed per edition** — the Accounts tab renders one credit summary and one account section per edition; the sync list in Settings is grouped the same way, and the "+" dialog asks for the edition first (a pasted token cannot tell the two apart by itself).
+- **Pulled with the edition** — 从电脑同步凭据 takes `variant` from the desktop: accounts it creates land in the right edition, and accounts that were previously saved as 国内版 by mistake are corrected (desktop → 国际版 only). Pushing sends `variant` too, so an 国际版 account never lands in the desktop's 国内版 list.
+- **Check-in / growth center are 国内版 only** — 国际版 accounts are skipped explicitly (and the summary says how many), not counted as failures.
 
 ### Inspecting credentials
 

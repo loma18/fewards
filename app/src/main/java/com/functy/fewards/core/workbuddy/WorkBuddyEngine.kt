@@ -18,6 +18,8 @@ import org.json.JSONObject
  * 幂等：HTTP 400 + body code==10001 = 今日已签（视为成功）；401/403 = token 过期。
  * ⚠️ `today_checked_in` 字段不可靠，仅作快速短路；最终以 daily-checkin 的 code==0/10001 为准。
  * （接口细节可根据实际抓包微调）
+ *
+ * 签到只有**国内版**有接口；国际版账号在 [checkin] 里直接跳过（见 [WorkBuddyVariant.supportsCheckin]）。
  */
 class WorkBuddyEngine(
     private val client: OkHttpClient,
@@ -91,6 +93,17 @@ class WorkBuddyEngine(
         if (token.isEmpty()) {
             emit("WorkBuddy 未配置 token")
             return false
+        }
+
+        /**
+         * 国际版没有签到接口（端点只在 copilot.tencent.com 上，国际版打过去是跨档请求）。
+         * 这里**按跳过处理并返回 true**：它不是"签到失败"，不该让整轮被判成失败，
+         * 也不该让用户看到一条永远修不好的红字。
+         */
+        val variant = WorkBuddyVariant.ofAccount(account)
+        if (!variant.supportsCheckin) {
+            emit("${variant.label}（${variant.appLabel}）暂无签到接口，已跳过")
+            return true
         }
 
         // 1. 状态查询（只用于省一次请求 + 401 探测）

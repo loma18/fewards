@@ -88,9 +88,9 @@ object TaskRunner {
             val deferred = async {
                 _state.value = _state.value.copy(wbRunning = true, wbStatus = TaskStatus.QUERYING)
                 try {
-                    val list = accounts.workBuddyAccounts()
+                    val all = accounts.workBuddyAccounts()
                     // WB label：优先用 JWT 内实际昵称；历史占位名一并更新
-                    list.forEach { acc ->
+                    all.forEach { acc ->
                         if (acc.label == "WorkBuddy 账号" || acc.label == "Work Buddy 账号") {
                             val real = WorkBuddyLabel.decode(acc.token)
                             if (real != null) {
@@ -98,9 +98,25 @@ object TaskRunner {
                             }
                         }
                     }
-                    if (list.isEmpty() || !repo.wbMasterEnabled) {
-                        if (list.isEmpty()) AppLog.w("WB", "WorkBuddy 未配置账号，跳过")
+                    if (all.isEmpty() || !repo.wbMasterEnabled) {
+                        if (all.isEmpty()) AppLog.w("WB", "WorkBuddy 未配置账号，跳过")
                         _state.value = _state.value.copy(wbRunning = false, wbStatus = TaskStatus.UNCONFIGURED)
+                        return@async
+                    }
+                    /**
+                     * 签到只有国内版有接口（端点在 copilot.tencent.com 上，国际版打过去是跨档请求），
+                     * 国际版账号在这里就滤掉，不去撞一遍拿 401 回来。
+                     *
+                     * 全是国际版账号时按"今天没事可做"处理：不是失败，也不该让首页一直挂着未完成。
+                     */
+                    val list = all.filter { it.wbVariant.supportsCheckin }
+                    val intlCount = all.size - list.size
+                    if (list.isEmpty()) {
+                        AppLog.i("WB", "只有国际版账号（$intlCount 个），暂无签到接口，跳过")
+                        accounts.markDoneToday("wb")
+                        summaries.add("WorkBuddy: 国际版暂不支持签到（$intlCount 个账号跳过）")
+                        _state.value = _state.value.copy(wbRunning = false, wbStatus = TaskStatus.DONE)
+                        onStepDone(true)
                         return@async
                     }
                     val engine = WorkBuddyEngine(fewardsApp.okhttpClient, list)
@@ -130,6 +146,7 @@ object TaskRunner {
                         }
                         if (growthCredits > 0) summaries.add("成长中心: +$growthCredits 积分")
                     }
+                    if (intlCount > 0) summaries.add("WorkBuddy: $intlCount 个国际版账号跳过（暂无签到与成长中心）")
 
                     if (ok) accounts.markDoneToday("wb")
                     _state.value = _state.value.copy(

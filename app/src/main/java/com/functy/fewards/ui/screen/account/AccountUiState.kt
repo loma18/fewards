@@ -41,6 +41,13 @@ data class AccountUiState(
     // WorkBuddy
     val wbAccounts: List<AccountRepository.WorkBuddyAccount> = emptyList(),
     val wbLoginMode: Int = 0, // 0 扫码；1 Token
+    /**
+     * 新增账号要归到哪一档：0 国内版 / 1 国际版（索引对应 `WorkBuddyVariant.ordered()`）。
+     *
+     * 两档是两套独立客户端，token 不能混用，所以「扫码 / 粘贴 token」必须先选档位，
+     * 否则国际版 token 会被当成国内版存下来，之后查积分、刷新全打错域名。
+     */
+    val wbLoginVariant: Int = 0,
     val wbQrState: QrState = QrState.Idle,
     val wbQrContent: String = "",
     /** 失败时的原始错误信息（网络异常等），显示在二维码下方，避免只给一句「获取二维码失败」 */
@@ -58,6 +65,8 @@ data class AccountActions(
     /** 返回 true 表示 token 被接受（弹窗据此关闭）；false 保留输入让用户改。 */
     val onImportWbToken: (String) -> Boolean,
     val onSetWbLoginMode: (Int) -> Unit,
+    /** 切换新增账号的档位（0 国内版 / 1 国际版） */
+    val onSetWbLoginVariant: (Int) -> Unit,
     val onStartWbQr: () -> Unit,
     val onCancelWbQr: () -> Unit,
     /** 打开某账号的积分明细弹窗（同时拉取逐笔记录） */

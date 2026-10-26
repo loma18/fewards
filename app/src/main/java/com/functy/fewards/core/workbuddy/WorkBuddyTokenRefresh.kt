@@ -15,6 +15,12 @@ import org.json.JSONObject
  * 官方网关会校验客户端指纹（`Origin` / `Referer` / `User-Agent` / `X-CodeBuddy-Request`），
  * 少一个就可能是 403 而不是"凭据无效"。
  *
+ * ## 档位
+ *
+ * 刷新域按档位分流：国内版 `copilot.tencent.com`，国际版 `www.workbuddy.ai`。
+ * `Origin` / `Referer` / UA 里的平台名也跟着换（官方按平台名做指纹校验），
+ * **跨档位刷新一定失败**，所以调用方必须把账号的 `variant` 传进来。
+ *
  * ## 轮换语义（决定了整个同步方案）
  *
  * 刷新成功时服务端会**换发新的 refresh_token，并立刻作废旧值**。所以：
@@ -30,6 +36,7 @@ import org.json.JSONObject
 class WorkBuddyTokenRefresh(private val client: OkHttpClient) {
 
     companion object {
+        /** 国内版刷新域；国际版见 [WorkBuddyVariant.chatBase] */
         const val API_BASE = "https://copilot.tencent.com"
         const val PATH_REFRESH = "/v2/plugin/auth/token/refresh"
 
@@ -42,7 +49,9 @@ class WorkBuddyTokenRefresh(private val client: OkHttpClient) {
 
         private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
-        private fun userAgent() = "WorkBuddy/$CLIENT_VERSION WorkBuddy/$CLIENT_VERSION CLI/$CLI_VERSION"
+        /** UA 的平台名按档位换（`WorkBuddy` / `WorkBuddy AI`），与电脑端 `userAgent()` 对齐 */
+        private fun userAgent(variant: WorkBuddyVariant) =
+            "WorkBuddy/$CLIENT_VERSION ${variant.userAgentPlatform}/$CLIENT_VERSION CLI/$CLI_VERSION"
 
         /** 解析刷新响应。返回 null 表示结构不认识（按失败处理） */
         fun parse(payload: JSONObject, nowMs: Long = System.currentTimeMillis()): Refreshed? {
@@ -87,21 +96,27 @@ class WorkBuddyTokenRefresh(private val client: OkHttpClient) {
     /**
      * 用 refresh_token 换一份新凭据。
      *
+     * @param variant 账号档位（`cn` / `ai`）：决定刷新域与出站指纹头，传错一定失败
      * @throws IllegalStateException 凭据失效 / 响应不可解析（消息可直接展示）
      */
-    suspend fun refresh(refreshToken: String, uid: String = ""): Refreshed = withContext(Dispatchers.IO) {
+    suspend fun refresh(
+        refreshToken: String,
+        uid: String = "",
+        variant: String = "cn",
+    ): Refreshed = withContext(Dispatchers.IO) {
         val token = refreshToken.trim()
         require(token.isNotEmpty()) { "该账号没有 refresh_token，需要重新扫码登录" }
+        val v = WorkBuddyVariant.of(variant)
 
         val builder = Request.Builder()
-            .url(API_BASE + PATH_REFRESH)
+            .url(v.chatBase + PATH_REFRESH)
             .post("{}".toRequestBody(jsonMedia))
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .header("X-Requested-With", "XMLHttpRequest")
-            .header("Origin", "https://www.codebuddy.cn")
-            .header("Referer", "https://www.codebuddy.cn/")
-            .header("User-Agent", userAgent())
+            .header("Origin", v.apiEndpoint)
+            .header("Referer", v.apiEndpoint + "/")
+            .header("User-Agent", userAgent(v))
             .header("X-CodeBuddy-Request", "1")
             // refresh_token 只允许出现在这个头里，绝不进 chat 请求
             .header("X-Refresh-Token", token)

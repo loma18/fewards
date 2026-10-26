@@ -6,6 +6,7 @@ import com.functy.fewards.core.AppLog
 import com.functy.fewards.core.workbuddy.WorkBuddyCredits
 import com.functy.fewards.core.workbuddy.WorkBuddyLabel
 import com.functy.fewards.core.workbuddy.WorkBuddyLogin
+import com.functy.fewards.core.workbuddy.WorkBuddyVariant
 import com.functy.fewards.data.repository.AccountRepository
 import com.functy.fewards.fewardsApp
 import com.functy.fewards.ui.screen.account.AccountActions
@@ -76,6 +77,26 @@ class AccountViewModel : ViewModel() {
         _uiState.update { it.copy(wbLoginMode = mode) }
     }
 
+    /** 切换新增账号的档位（0 国内版 / 1 国际版）。切换后需要重新申请二维码，见 AccountPager 的 LaunchedEffect。 */
+    fun setWbLoginVariant(index: Int) {
+        _uiState.update { it.copy(wbLoginVariant = index.coerceIn(0, WorkBuddyVariant.ordered().size - 1)) }
+    }
+
+    /** 当前选中的新增档位 */
+    private fun selectedLoginVariant(): WorkBuddyVariant {
+        val ordered = WorkBuddyVariant.ordered()
+        return ordered.getOrElse(_uiState.value.wbLoginVariant) { WorkBuddyVariant.CN }
+    }
+
+    /**
+     * 账号 id。
+     *
+     * 国际版必须带档位前缀：两档可能存在**同一个 uid**（同一手机号在两套客户端各注册一份），
+     * 而 id 是本地列表、积分缓存的键，共用 id 会让两条记录互相覆盖。
+     */
+    private fun accountId(uid: String, variant: WorkBuddyVariant): String =
+        if (variant == WorkBuddyVariant.CN) "wb_$uid" else "wb_${variant.id}_$uid"
+
     /**
      * WorkBuddy 扫码授权：申请授权链接 -> 轮询 -> 落库（按 uid 去重）。
      * 扫码成功后只纳管，不自动签到；签到仍由首页「开始执行」统一触发。
@@ -83,18 +104,21 @@ class AccountViewModel : ViewModel() {
     fun startWbQrLogin() {
         wbQrJob?.cancel()
         _uiState.update { it.copy(wbQrState = QrState.Loading, wbQrContent = "", wbQrError = "") }
+        // 档位在**发起时**固定：等待期间用户再切档位，也只影响下一张码，不影响这张
+        val variant = selectedLoginVariant()
         wbQrJob = viewModelScope.launch {
             try {
-                val session = wbLogin.startLogin()
+                val session = wbLogin.startLogin(variant.id)
                 _uiState.update { it.copy(wbQrState = QrState.Waiting, wbQrContent = session.authUrl) }
                 val result = wbLogin.awaitLogin(session)
                 val existed = accounts.workBuddyAccounts().any {
-                    it.uid == result.uid || (it.uid.isEmpty() && it.label == result.nickname)
+                    it.wbVariant == variant &&
+                        (it.uid == result.uid || (it.uid.isEmpty() && it.label == result.nickname))
                 }
                 val profile = WorkBuddyLabel.decodeProfile(result.accessToken)
                 accounts.addWorkBuddyAccount(
                     AccountRepository.WorkBuddyAccount(
-                        id = "wb_${result.uid}",
+                        id = accountId(result.uid, variant),
                         label = result.nickname.ifEmpty { profile.label ?: "Work Buddy 账号" },
                         token = result.accessToken,
                         avatarUrl = profile.avatarUrl.orEmpty(),
@@ -104,9 +128,13 @@ class AccountViewModel : ViewModel() {
                         expiresAt = result.expiresAt,
                         // 记录"这份凭据是什么时候拿到的"，同步时电脑端要靠它判断新旧
                         obtainedAt = System.currentTimeMillis(),
+                        variant = variant.id,
                     )
                 )
-                AppLog.i("WB", "账号 ${result.nickname} 扫码授权成功${if (existed) "（已更新）" else ""}")
+                AppLog.i(
+                    "WB",
+                    "账号 ${result.nickname}（${variant.label}）扫码授权成功${if (existed) "（已更新）" else ""}",
+                )
                 // 先刷新列表再标记成功：Confirmed 会触发弹窗关闭并 cancel 本协程，
                 // 顺序反了就可能"账号已落库、列表却没刷新"
                 publishAccounts()
@@ -147,26 +175,35 @@ class AccountViewModel : ViewModel() {
             AppLog.e("WB", "token 为空")
             return false
         }
+        // 粘贴的 token 无法从内容判断档位，只能按用户选的来——选错会一直 401
+        val variant = selectedLoginVariant()
         val profile = WorkBuddyLabel.decodeProfile(trimmed)
         val uid = profile.uid
-        // 老账号（扫码前导入的）没有 uid，退回按昵称判定，避免同一账号出现两条
+        // 老账号（扫码前导入的）没有 uid，退回按昵称判定，避免同一账号出现两条；档位必须一起比
         val existed = accounts.workBuddyAccounts().any {
-            (uid.isNotEmpty() && it.uid == uid) ||
-                (it.uid.isEmpty() && profile.label != null && it.label == profile.label)
+            it.wbVariant == variant && (
+                (uid.isNotEmpty() && it.uid == uid) ||
+                    (it.uid.isEmpty() && profile.label != null && it.label == profile.label)
+                )
         }
         accounts.addWorkBuddyAccount(
             AccountRepository.WorkBuddyAccount(
                 // 同账号重复导入 = 更新，不再新增一条
-                id = if (uid.isNotEmpty()) "wb_$uid" else "wb_" + System.currentTimeMillis(),
+                id = if (uid.isNotEmpty()) {
+                    accountId(uid, variant)
+                } else {
+                    "wb_${variant.id}_" + System.currentTimeMillis()
+                },
                 label = profile.label ?: "Work Buddy 账号",
                 token = trimmed,
                 avatarUrl = profile.avatarUrl.orEmpty(),
                 uid = uid,
                 expiresAt = profile.expiresAt,
                 obtainedAt = System.currentTimeMillis(),
+                variant = variant.id,
             )
         )
-        AppLog.i("WB", "WorkBuddy token 导入成功")
+        AppLog.i("WB", "WorkBuddy token 导入成功（${variant.label}）")
         refresh()
         return true
     }
@@ -304,6 +341,7 @@ class AccountViewModel : ViewModel() {
     val accountActions = AccountActions(
         onRemoveWb = ::removeWb,
         onSetWbLoginMode = ::setWbLoginMode,
+        onSetWbLoginVariant = ::setWbLoginVariant,
         onStartWbQr = ::startWbQrLogin,
         onCancelWbQr = ::cancelWbQr,
         onImportWbToken = ::importWbToken,

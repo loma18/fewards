@@ -47,6 +47,10 @@ import top.yukonga.miuix.kmp.window.WindowDialog
  *
  * 状态由调用方驱动；关闭走 WindowDialog 自带下滑淡出动画，
  * 动画结束后才回调 [onDismissFinished]（调用方在那里停轮询）。
+ *
+ * **档位选择**（[variantLabels] 非空时显示）排在登录方式 Tab 之上：WorkBuddy 国内版与
+ * 国际版是两套独立客户端、两套域名，token 不通用，所以「扫码」和「粘贴凭据」都必须先定档位，
+ * 否则国际版 token 会被当成国内版存下来，之后查积分 / 刷新全打错域名。
  */
 @Composable
 fun AddAccountDialog(
@@ -65,6 +69,10 @@ fun AddAccountDialog(
     onDismissRequest: () -> Unit,
     onDismissFinished: () -> Unit,
     onRetry: () -> Unit,
+    /** 档位名称（如 `国内版` / `国际版`）；为空表示不显示这一行 */
+    variantLabels: List<String> = emptyList(),
+    selectedVariant: Int = 0,
+    onVariantSelected: (Int) -> Unit = {},
     /**
      * 主 Tab 的自定义内容。为 null 时渲染内置二维码区；
      * 非 null 时完全由调用方决定主 Tab 长什么样（Bing 传的是授权 WebView）。
@@ -87,6 +95,14 @@ fun AddAccountDialog(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                if (variantLabels.isNotEmpty()) {
+                    TabRowWithContour(
+                        tabs = variantLabels,
+                        selectedTabIndex = selectedVariant.coerceIn(0, variantLabels.size - 1),
+                        onTabSelected = onVariantSelected,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
                 TabRowWithContour(
                     tabs = tabs,
                     selectedTabIndex = selectedTab,

@@ -53,6 +53,13 @@ object LanSyncProtocol {
          * 不返回 refresh 有效期时会这样），电脑端不会据此判死。
          */
         val refreshExpiresAt: Long = 0L,
+        /**
+         * 档位：`cn` 国内版 / `ai` 国际版。
+         *
+         * 电脑端按它决定账号落进哪一档（域名、进程、登录态文件全都不同）。早先这里写死
+         * `"cn"`，手机推过去的国际版账号在电脑端会被当成国内版，切号时打错域名直接 401。
+         */
+        val variant: String = "cn",
     )
 
     /** 电脑端回传的账号（b 的形态，字段名已换成 a 的习惯） */
@@ -79,6 +86,13 @@ object LanSyncProtocol {
          * 建号时缺这个字段会在多企业账号上表现出"少了一条归属"。
          */
         val enterpriseId: String = "",
+        /**
+         * 档位（已归一化成 `cn` / `ai`）。
+         *
+         * 缺这个字段时历史行为是"一律当国内版"：手机端会把国际版账号建成本地国内版账号，
+         * 之后查积分 / 刷新全打国内域，表现为"刚从电脑同步完就查询失败"。
+         */
+        val variant: String = "cn",
     )
 
     /** 单条裁决结果 */
@@ -174,7 +188,7 @@ object LanSyncProtocol {
                     .put("refreshExpiresAt", a.refreshExpiresAt)
                     .put("obtainedAt", a.obtainedAt)
                     .put("version", 0)
-                    .put("variant", "cn")
+                    .put("variant", normalizeVariant(a.variant))
             )
         }
         return JSONObject()
@@ -242,7 +256,19 @@ object LanSyncProtocol {
         encrypted = o.optBoolean("encrypted", false),
         refreshedAt = o.optLong("refreshedAt"),
         enterpriseId = o.optString("enterpriseId"),
+        variant = normalizeVariant(o.optString("variant")),
     )
+
+    /**
+     * 档位归一化成 `cn` / `ai`。
+     *
+     * 与电脑端 `protocol.mjs:normalizeVariant` 同一口径：兼容 `ai` / `workbuddy-ai` / `intl`，
+     * 其余（含缺失）一律按国内版——历史数据本来就没有这个字段，按国内版解释才不会打错域名。
+     */
+    fun normalizeVariant(raw: String?): String = when (raw?.trim()?.lowercase()) {
+        "ai", "workbuddy-ai", "intl" -> "ai"
+        else -> "cn"
+    }
 
     /** 解析待同步队列 */
     fun parsePending(json: JSONObject): List<PendingItem> {

@@ -8,6 +8,7 @@ import com.functy.fewards.core.lansync.LanSyncClient
 import com.functy.fewards.core.lansync.LanSyncProtocol
 import com.functy.fewards.core.workbuddy.WorkBuddyGrowth
 import com.functy.fewards.core.workbuddy.WorkBuddyTokenRefresh
+import com.functy.fewards.core.workbuddy.WorkBuddyVariant
 import com.functy.fewards.data.repository.AccountRepository
 import com.functy.fewards.data.repository.SettingsRepository
 import com.functy.fewards.data.repository.SettingsRepositoryImpl
@@ -198,9 +199,21 @@ class SettingsViewModel(
     fun claimGrowth() {
         if (_uiState.value.wbGrowthBusy) return
         viewModelScope.launch {
-            val list = accounts.workBuddyAccounts()
-            if (list.isEmpty()) {
+            // 成长中心只在官网域（国内版）上有，国际版账号直接跳过并说明原因，
+            // 而不是打一通跨档请求拿 401 回来
+            val all = accounts.workBuddyAccounts()
+            val list = all.filter { it.wbVariant.supportsGrowth }
+            val intlCount = all.size - list.size
+            if (all.isEmpty()) {
                 _uiState.update { it.copy(wbGrowthReport = "还没有 WorkBuddy 账号，先到账号页扫码或导入") }
+                return@launch
+            }
+            if (list.isEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        wbGrowthReport = "只有国际版账号（$intlCount 个）：国际版暂无成长中心，跳过",
+                    )
+                }
                 return@launch
             }
             _uiState.update {
@@ -227,6 +240,7 @@ class SettingsViewModel(
                 append("一键领取完成：${list.size} 个账号")
                 if (credits > 0) append("，共 +$credits 积分")
                 if (hardFailures > 0) append("，$hardFailures 个存在异常")
+                if (intlCount > 0) append("，$intlCount 个国际版账号跳过（暂无成长中心）")
             }
             _uiState.update {
                 it.copy(wbGrowthBusy = false, wbGrowthReport = summary + "\n" + lines.joinToString("\n"))
@@ -274,7 +288,8 @@ class SettingsViewModel(
                     _uiState.update { it.copy(wbCredReport = lines.joinToString("\n")) }
                     continue
                 }
-                val r = runCatching { refresher.refresh(acc.refreshToken, acc.uid) }
+                // 刷新域按档位分流：国际版账号必须打国际域，否则只是白拿一个 401
+                val r = runCatching { refresher.refresh(acc.refreshToken, acc.uid, acc.variant) }
                 if (r.isSuccess) {
                     val t = r.getOrThrow()
                     accounts.updateWorkBuddyCredential(
@@ -398,6 +413,9 @@ class SettingsViewModel(
      * 2. **电脑端那份也必须有效**：电脑端也可能早就过期，写回去只会造成"看起来正常"的假象；
      * 3. **只写 token 数据**：已有账号只动 access / refresh / 过期时间，label、头像、企业信息保留；
      * 4. **加密信封不处理**：电脑端拿不出明文，建号只会多一条永远刷不动的死记录。
+     * 5. **档位按电脑端**：本版本之前从电脑同步过来的国际版账号被存成了国内版（当时不认识
+     *    `variant`），之后查积分 / 刷新全打国内域，表现为"同步完就查询失败"。所以电脑端回传的
+     *    `variant` 要同时用于「建号」和「纠正已有账号」（只纠正 cn→ai 一个方向，见实现处注释）。
      */
     fun pullCredentialsFromComputer() {
         if (_uiState.value.wbSyncBusy) return
@@ -429,9 +447,11 @@ class SettingsViewModel(
                 val now = System.currentTimeMillis()
                 val results = LinkedHashMap<String, String>()
                 var added = 0
+                var addedIntl = 0
                 var filled = 0
                 var kept = 0
                 var skipped = 0
+                var variantFixed = 0
 
                 fetched.remotes.values.forEach { remote ->
                     val key = remote.uid
@@ -439,7 +459,20 @@ class SettingsViewModel(
                         skipped++
                         return@forEach
                     }
+                    val variantId = LanSyncProtocol.normalizeVariant(remote.variant)
+                    val variant = WorkBuddyVariant.of(variantId)
                     val existing = local.firstOrNull { it.uid == key || it.id == key }
+                    /**
+                     * 档位纠正：只做「电脑端说是国际版 → 本机记成国内版」这一个方向。
+                     *
+                     * 本版本之前从电脑同步过来的国际版账号被存成了国内版（当时还不认识
+                     * `variant`），之后查积分 / 刷新全打国内域，表现为"同步完就查询失败"。
+                     * 电脑端是档位的权威来源（它自己按档位分进程、分登录态文件），所以按 uid
+                     * 命中即可纠正；反方向（cn）不纠，因为 cn 是历史默认值，纠不动也无害。
+                     */
+                    val fixedHere = existing != null && variantId == "ai" &&
+                        existing.wbVariant.id != variantId && accounts.setWorkBuddyVariant(key, variantId)
+                    if (fixedHere) variantFixed++
                     val note = when {
                         remote.encrypted || (remote.token.isEmpty() && remote.refreshToken.isEmpty()) -> {
                             skipped++
@@ -449,11 +482,12 @@ class SettingsViewModel(
                             skipped++
                             "电脑端凭据已失效"
                         }
-                        // 电脑端有、手机端没有 → 直接建号，省掉"先在手机上添加账号"这一步
+                        // 电脑端有、手机端没有 → 直接建号，省掉"先在手机上添加账号"这一步。
+                        // id 带档位前缀：同一 uid 可能在两档各有一份，键撞了会互相覆盖
                         existing == null -> {
                             accounts.addWorkBuddyAccount(
                                 AccountRepository.WorkBuddyAccount(
-                                    id = key,
+                                    id = if (variant == WorkBuddyVariant.CN) key else "wb_${variant.id}_$key",
                                     label = remote.label.ifEmpty { "uid=${key.take(10)}" },
                                     token = remote.token,
                                     uid = key,
@@ -463,14 +497,18 @@ class SettingsViewModel(
                                     obtainedAt = now,
                                     refreshExpiresAt = remote.refreshExpiresAt,
                                     syncVersion = remote.version,
+                                    // 档位跟着电脑端走：国际版账号必须留在国际版，否则后续
+                                    // 查积分 / 刷新会打到国内域，看起来像"凭据失效"
+                                    variant = variantId,
                                 )
                             )
                             added++
-                            "已从电脑新增"
+                            if (variant == WorkBuddyVariant.AI) addedIntl++
+                            "已从电脑新增（${variant.label}）"
                         }
                         !CredentialHealth.isDead(existing.token, existing.expiresAt, now) -> {
                             kept++
-                            "本机仍有效，未改动"
+                            if (fixedHere) "本机仍有效，未改动（档位已按电脑端纠正为国际版）" else "本机仍有效，未改动"
                         }
                         else -> {
                             val ok = accounts.updateWorkBuddyCredential(
@@ -491,7 +529,10 @@ class SettingsViewModel(
                             }
                         }
                     }
-                    results[existing?.id ?: key] = note
+                    // 界面按**账号 id**取结果；新建的国际版账号 id 带前缀，不能拿 uid 直接塞
+                    val resultKey = existing?.id
+                        ?: (if (variant == WorkBuddyVariant.CN) key else "wb_${variant.id}_$key")
+                    results[resultKey] = note
                 }
 
                 // 手机端失效、电脑端也没有的账号：明确点出来，别让用户以为同步漏了
@@ -510,10 +551,12 @@ class SettingsViewModel(
                 val stamp = System.currentTimeMillis()
                 val summary = buildString {
                     append("从电脑同步完成：新增 $added 个")
+                    if (addedIntl > 0) append("（其中国际版 $addedIntl 个）")
                     if (filled > 0) append("，补全 $filled 个")
                     if (kept > 0) append("，$kept 个本机仍有效未改动")
+                    if (variantFixed > 0) append("，纠正 $variantFixed 个账号的档位")
                     if (skipped > 0) append("，跳过 $skipped 个")
-                    if (added == 0 && filled == 0 && skipped == 0) append("，两端已经一致")
+                    if (added == 0 && filled == 0 && skipped == 0 && variantFixed == 0) append("，两端已经一致")
                     if (fetched.fallback) {
                         append("。电脑端控制台版本较旧：只能补已有账号，列不出电脑端全部账号")
                     }
@@ -594,6 +637,7 @@ class SettingsViewModel(
                         refreshExpiresAt = it.refreshExpiresAt,
                         // 0 = "新鲜度未知"：电脑端据此一律保留自己的凭据
                         obtainedAt = 0L,
+                        variant = it.variant,
                     )
                 },
                 deviceName = deviceName(),
@@ -661,7 +705,7 @@ class SettingsViewModel(
                     failed++
                     "没有 refresh_token，需重新扫码"
                 } else {
-                    val r = refresher.refresh(current.refreshToken, current.uid)
+                    val r = refresher.refresh(current.refreshToken, current.uid, current.variant)
                     val newRefresh = r.refreshToken.ifEmpty { current.refreshToken }
                     val expSec = if (r.expiresAtMs > 0) r.expiresAtMs / 1000 else current.expiresAt
                     val refreshExpSec =
@@ -746,18 +790,21 @@ class SettingsViewModel(
             )
         }
         return try {
-            val payloads = list.map {
-                LanSyncProtocol.Payload(
-                    uid = it.uid.ifEmpty { it.id },
-                    label = it.label,
-                    enterpriseId = it.enterpriseId,
-                    accessToken = it.token,
-                    refreshToken = it.refreshToken,
-                    expiresAt = it.expiresAt,
-                    refreshExpiresAt = it.refreshExpiresAt,
-                    obtainedAt = it.obtainedAt,
-                )
-            }
+        val payloads = list.map {
+            LanSyncProtocol.Payload(
+                uid = it.uid.ifEmpty { it.id },
+                label = it.label,
+                enterpriseId = it.enterpriseId,
+                accessToken = it.token,
+                refreshToken = it.refreshToken,
+                expiresAt = it.expiresAt,
+                refreshExpiresAt = it.refreshExpiresAt,
+                obtainedAt = it.obtainedAt,
+                // 档位必须带上：电脑端按它决定账号落进哪一档（域名 / 进程 / 登录态文件都不同）。
+                // 早先这里写死 cn，手机推过去的国际版账号在电脑端会被当成国内版。
+                variant = it.variant,
+            )
+        }
             val resp = syncClient.push(
                 endpoint = endpoint,
                 pairCode = state.wbSyncPairCode,

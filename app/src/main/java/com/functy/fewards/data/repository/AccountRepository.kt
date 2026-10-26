@@ -63,7 +63,19 @@ class AccountRepository {
         val refreshExpiresAt: Long = 0L,
         /** 电脑端维护的同步版本；a 只记录用于展示与回传 */
         val syncVersion: Long = 0L,
-    )
+        /**
+         * 档位：`cn` 国内版 / `ai` 国际版。
+         *
+         * 两档是两套独立客户端、两套域名，**绝不能混用**——国际版 token 打国内域只会
+         * 拿到 401，看起来像"凭据失效"，实际是打错了地方。
+         * 历史账号没有这个字段，读出来是 `cn`（零迁移），与 [com.functy.fewards.core.workbuddy.WorkBuddyVariant.of] 一致。
+         */
+        val variant: String = "cn",
+    ) {
+        /** 档位（归一化后），UI 与网络层都从这里取，不要自己判断字符串 */
+        val wbVariant: com.functy.fewards.core.workbuddy.WorkBuddyVariant
+            get() = com.functy.fewards.core.workbuddy.WorkBuddyVariant.of(variant)
+    }
 
     fun workBuddyAccounts(): List<WorkBuddyAccount> {
         val raw = prefs.getString("sec.wb.accounts", null) ?: return emptyList()
@@ -83,6 +95,8 @@ class AccountRepository {
                     obtainedAt = o.optLong("obtainedAt"),
                     refreshExpiresAt = o.optLong("refreshExpiresAt"),
                     syncVersion = o.optLong("syncVersion"),
+                    // 老数据没有这个字段：optString 返回空串 → 归一化成国内版
+                    variant = o.optString("variant").ifEmpty { "cn" },
                 )
             }
         }.getOrDefault(emptyList())
@@ -98,11 +112,15 @@ class AccountRepository {
      */
     fun addWorkBuddyAccount(account: WorkBuddyAccount) {
         val list = workBuddyAccounts().toMutableList()
+        // 去重必须带上档位：同一 uid 在国内版与国际版是两个独立账号（两套客户端、两套域名），
+        // 只按 uid 匹配会让后扫的那一档覆盖掉前一档，表现为"扫了国际版，国内版却掉登录"。
         val index = list.indexOfFirst { existing ->
             existing.id == account.id ||
-                (account.uid.isNotEmpty() && existing.uid == account.uid) ||
+                (account.uid.isNotEmpty() && existing.uid == account.uid &&
+                    existing.wbVariant == account.wbVariant) ||
                 (account.uid.isNotEmpty() && existing.uid.isEmpty() &&
-                    existing.label.isNotEmpty() && existing.label == account.label)
+                    existing.label.isNotEmpty() && existing.label == account.label &&
+                    existing.wbVariant == account.wbVariant)
         }
         if (index >= 0) list[index] = account else list.add(account)
         saveWorkBuddy(list)
@@ -133,6 +151,8 @@ class AccountRepository {
         /** 毫秒 */
         obtainedAt: Long = System.currentTimeMillis(),
         syncVersion: Long = 0L,
+        /** 非空时顺带纠正档位（同步时电脑端才知道国际版账号属于哪一档） */
+        variant: String = "",
     ): Boolean {
         if (uid.isEmpty()) return false
         val list = workBuddyAccounts().toMutableList()
@@ -146,7 +166,29 @@ class AccountRepository {
             refreshExpiresAt = if (refreshExpiresAt > 0) refreshExpiresAt else old.refreshExpiresAt,
             obtainedAt = if (obtainedAt > 0) obtainedAt else old.obtainedAt,
             syncVersion = if (syncVersion > 0) syncVersion else old.syncVersion,
+            variant = if (variant.isNotEmpty()) variant else old.variant,
         )
+        saveWorkBuddy(list)
+        return true
+    }
+
+    /**
+     * 只纠正档位（不改凭据）。
+     *
+     * 用途：本版本之前从电脑同步过来的国际版账号被存成了国内版（当时还不认识 `variant`），
+     * 它们再去查积分 / 刷新就会打到国内域，看起来像"凭据失效"。同步时电脑端是权威来源，
+     * 按 uid 命中即可把档位纠正回来。
+     *
+     * @return true 表示找到并改了
+     */
+    fun setWorkBuddyVariant(uid: String, variant: String): Boolean {
+        if (uid.isEmpty() || variant.isEmpty()) return false
+        val list = workBuddyAccounts().toMutableList()
+        val index = list.indexOfFirst { it.uid == uid || it.id == uid }
+        if (index < 0) return false
+        val old = list[index]
+        if (old.wbVariant.id == com.functy.fewards.core.workbuddy.WorkBuddyVariant.of(variant).id) return false
+        list[index] = old.copy(variant = variant)
         saveWorkBuddy(list)
         return true
     }
@@ -167,6 +209,7 @@ class AccountRepository {
                     .put("obtainedAt", a.obtainedAt)
                     .put("refreshExpiresAt", a.refreshExpiresAt)
                     .put("syncVersion", a.syncVersion)
+                    .put("variant", a.variant)
             )
         }
         prefs.edit { putString("sec.wb.accounts", arr.toString()) }

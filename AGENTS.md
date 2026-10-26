@@ -168,6 +168,23 @@ app/src/test/java/com/functy/fewards/
   不要换成真实时间戳，否则可能用手机端的死凭据覆盖电脑端。
   电脑端刷新后会入队，a 主动拉取，不要改成 b 反向推给 a（手机 IP 会变、后台监听不可靠）。
 
+- **档位（国内版 / 国际版）**：两档是**两套独立客户端**（`WorkBuddy` / `WorkBuddy AI`），
+  两套域名、两套登录态文件、进程也不同，**绝不跨档请求**——国际版 token 打国内域只会 401，
+  看起来像"凭据失效"。单一事实来源是 `core/workbuddy/WorkBuddyVariant.kt`（复刻电脑端
+  `server/workbuddy/variant.mjs`）：
+  - 账号库带 `variant`（`cn` / `ai`），历史账号缺失=国内版（零迁移）；`WorkBuddyAccount.wbVariant`
+    是唯一取用入口，不要自己比字符串。
+  - 积分走 `apiEndpoint`，刷新走 `chatBase`，扫码走 `chatBase` + `oauthPlatform`
+    （国内版固定 `CLI`，国际版 `workbuddy-ai`）；UA 的平台名也随档位换。
+  - 签到（`WorkBuddyEngine`）与成长中心（`WorkBuddyGrowth`）只有国内版有接口，
+    国际版账号**显式跳过**（返回"跳过"而不是失败），首页与「一键领取」要分别说明跳过了几个。
+  - 同步协议里 `Payload.variant` / `Remote.variant` 与电脑端同口径
+    （`LanSyncProtocol.normalizeVariant`，只认 `cn` / `ai`）。「从电脑同步凭据」用电脑端的
+    `variant` **建号**，并只做 `cn → ai` 一个方向的纠正（本版本之前国际版账号被存成国内版，
+    之后查积分 / 刷新全打错域名）；反方向不纠，因为 `cn` 是历史默认值。
+  - 账号 id 在国际版要带前缀（`wb_ai_<uid>`）：同一 uid 可能在两档各有一份，键撞了会互相覆盖。
+  - 界面两档**分开成组**（账号页各自一张积分汇总卡 + 分区；设置页同步清单分区；添加弹窗先选档位）。
+
 ## 账号与配置
 
 - 凭据只存在本机 SharedPreferences（`AccountRepository` / `SettingsRepositoryImpl`）。日志禁止打印 token / cookie / stoken。

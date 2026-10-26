@@ -279,6 +279,76 @@ class LanSyncProtocolTest {
         assertTrue(LanSyncProtocol.parseFetchResponse(JSONObject("""{"ok":true}""")).isEmpty())
     }
 
+    // ==================== 档位（国内版 / 国际版） ====================
+
+    @Test
+    fun normalizeVariantOnlyKeepsTwoValues() {
+        // 未知 / 缺失一律按国内版：历史数据没有这个字段，打错域名比"不认识"更糟
+        assertEquals("cn", LanSyncProtocol.normalizeVariant(null))
+        assertEquals("cn", LanSyncProtocol.normalizeVariant(""))
+        assertEquals("cn", LanSyncProtocol.normalizeVariant("cn"))
+        assertEquals("cn", LanSyncProtocol.normalizeVariant("CN"))
+        assertEquals("cn", LanSyncProtocol.normalizeVariant("whatever"))
+        assertEquals("ai", LanSyncProtocol.normalizeVariant("ai"))
+        assertEquals("ai", LanSyncProtocol.normalizeVariant("AI"))
+        assertEquals("ai", LanSyncProtocol.normalizeVariant("workbuddy-ai"))
+        assertEquals("ai", LanSyncProtocol.normalizeVariant("intl"))
+    }
+
+    @Test
+    fun pushBodyCarriesPerAccountVariant() {
+        // 早先这里写死 "cn"：手机推过去的国际版账号在电脑端被当成国内版，切号时打错域名 401
+        val body = LanSyncProtocol.buildPushBody(
+            accounts = listOf(
+                LanSyncProtocol.Payload(
+                    uid = "u-cn", label = "国内号", enterpriseId = "", accessToken = "AT",
+                    refreshToken = "RT", expiresAt = 0L, obtainedAt = 0L,
+                ),
+                LanSyncProtocol.Payload(
+                    uid = "u-ai", label = "国际号", enterpriseId = "", accessToken = "AT2",
+                    refreshToken = "RT2", expiresAt = 0L, obtainedAt = 0L, variant = "ai",
+                ),
+            ),
+            deviceName = "Pixel",
+            force = false,
+        )
+        val arr = body.getJSONArray("accounts")
+        assertEquals("cn", arr.getJSONObject(0).getString("variant"))
+        assertEquals("ai", arr.getJSONObject(1).getString("variant"))
+    }
+
+    @Test
+    fun parsesFetchVariant() {
+        val json = JSONObject(
+            """
+            {
+              "ok": true,
+              "accounts": [
+                {"uid":"u1","variant":"ai","token":"AT","refreshToken":"RT"},
+                {"uid":"u2","token":"AT","refreshToken":"RT"},
+                {"uid":"u3","variant":"workbuddy-ai","token":"AT","refreshToken":"RT"}
+              ]
+            }
+            """.trimIndent()
+        )
+        val list = LanSyncProtocol.parseFetchResponse(json)
+        assertEquals("ai", list[0].variant)
+        // 缺字段按国内版（老控制台 / 历史数据），不能因为读不到就丢掉账号
+        assertEquals("cn", list[1].variant)
+        assertEquals("ai", list[2].variant)
+    }
+
+    @Test
+    fun parsesPushResultVariant() {
+        val json = JSONObject(
+            """
+            {"results":[{"uid":"u1","action":"adopt","reason":"","message":"","risk":"",
+              "account":{"uid":"u1","token":"AT","refreshToken":"RT","variant":"ai"}}]}
+            """.trimIndent()
+        )
+        assertEquals("ai", LanSyncProtocol.parsePushResponse(json).results[0].account?.variant)
+    }
+
     // ==================== 错误文案 ====================
 
     @Test

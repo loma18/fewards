@@ -61,6 +61,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.functy.fewards.R
 import com.functy.fewards.core.workbuddy.WorkBuddyCredits
+import com.functy.fewards.core.workbuddy.WorkBuddyVariant
 import com.functy.fewards.data.repository.AccountRepository
 import com.functy.fewards.ui.component.IconSquircleCornerFraction
 import com.functy.fewards.ui.component.WbCredentialBlock
@@ -139,9 +140,10 @@ fun AccountPagerMiuix(
         if (state.wbQrState == QrState.Confirmed) showWbDialog = false
     }
     // 停在扫码 Tab 且没有活着的会话时申请二维码。
-    // 以「弹窗开合 + Tab」为 key：弹窗弹出动画（folme spring）结束后才申请，
-    // 切走再切回扫码 Tab 也会重新申请一张新码；过期 / 失败后重开同样能自愈。
-    LaunchedEffect(showWbDialog, state.wbLoginMode) {
+    // 以「弹窗开合 + Tab + 档位」为 key：弹窗弹出动画（folme spring）结束后才申请，
+    // 切走再切回扫码 Tab 也会重新申请一张新码；**换档位同样要换一张**（state 与档位绑定，
+    // 拿国内版的 state 去国际版换 token 只会一直"等待中"）；过期 / 失败后重开同样能自愈。
+    LaunchedEffect(showWbDialog, state.wbLoginMode, state.wbLoginVariant) {
         if (!showWbDialog || state.wbLoginMode != 0) return@LaunchedEffect
         if (state.wbQrState == QrState.Waiting || state.wbQrState == QrState.Scanned) return@LaunchedEffect
         kotlinx.coroutines.delay(450)
@@ -162,6 +164,14 @@ fun AccountPagerMiuix(
                 actions.onSetWbLoginMode(tab)
                 // 离开扫码 Tab 时停掉轮询；再切回扫码时上面那个 LaunchedEffect 会重新申请一张新码
                 if (tab != 0) actions.onCancelWbQr()
+            },
+            // 档位：国内版 / 国际版。切换后旧码作废，由上面的 LaunchedEffect 换一张新码
+            variantLabels = WorkBuddyVariant.ordered().map { it.label },
+            selectedVariant = state.wbLoginVariant,
+            onVariantSelected = { index ->
+                dismissInput()
+                actions.onSetWbLoginVariant(index)
+                actions.onCancelWbQr()
             },
             // 空闲 / 加载中不显示上一轮的二维码（切走再切回时先转圈，而不是闪一张旧码）；
             // 过期 / 失败仍保留那张码，配合「已失效 + 重新获取」。
@@ -206,7 +216,10 @@ fun AccountPagerMiuix(
     // 积分明细弹窗：常驻挂载，靠 show 控制开合（关闭动画期间还要渲染上一份数据）
     WbCreditsDialog(
         show = state.wbCreditDetailId.isNotEmpty(),
-        accountLabel = state.wbAccounts.firstOrNull { it.id == state.wbCreditDetailId }?.label.orEmpty(),
+        accountLabel = state.wbAccounts.firstOrNull { it.id == state.wbCreditDetailId }?.let { acc ->
+            // 两档的积分体系是分开的，弹窗标题上标出来免得对着国内版余额查国际版账号
+            if (acc.wbVariant == WorkBuddyVariant.CN) acc.label else "${acc.label}（${acc.wbVariant.label}）"
+        }.orEmpty(),
         credit = state.wbCredits[state.wbCreditDetailId] ?: WbCreditState(),
         detail = state.wbCreditDetail,
         onDismissRequest = { actions.onCloseWbCredits() },
@@ -286,30 +299,43 @@ fun AccountPagerMiuix(
             overscrollEffect = null,
         ) {
             if (state.wbAccounts.isNotEmpty()) {
-                item {
-                    CreditSummaryCard(
-                        accounts = state.wbAccounts,
-                        credits = state.wbCredits,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
-                }
-                item { SectionHeader(stringResource(R.string.workbuddy)) }
-                item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column {
-                            state.wbAccounts.forEach { account ->
-                                WbAccountRow(
-                                    account = account,
-                                    credit = state.wbCredits[account.id],
-                                    onViewCredits = {
-                                        dismissInput()
-                                        actions.onViewWbCredits(account.id)
-                                    },
-                                    onRemove = {
-                                        dismissInput()
-                                        actions.onRemoveWb(account.id)
-                                    },
-                                )
+                /**
+                 * 国内版 / 国际版**分别成组**：两档是两套独立客户端、两套域名，
+                 * 积分池也不互通，混在一张列表里会让人误以为"国际版账号的余额没查出来"。
+                 * 分组顺序固定国内版在前（见 `WorkBuddyVariant.ordered()`）。
+                 */
+                WorkBuddyVariant.group(state.wbAccounts).forEach { (variant, list) ->
+                    item {
+                        CreditSummaryCard(
+                            accounts = list,
+                            credits = state.wbCredits,
+                            variant = variant,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
+                    item {
+                        SectionHeader(
+                            text = "${variant.label} · ${variant.appLabel}",
+                            note = if (!variant.supportsCheckin) "（该档位暂无签到与成长中心）" else "",
+                        )
+                    }
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column {
+                                list.forEach { account ->
+                                    WbAccountRow(
+                                        account = account,
+                                        credit = state.wbCredits[account.id],
+                                        onViewCredits = {
+                                            dismissInput()
+                                            actions.onViewWbCredits(account.id)
+                                        },
+                                        onRemove = {
+                                            dismissInput()
+                                            actions.onRemoveWb(account.id)
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -334,6 +360,8 @@ fun AccountPagerMiuix(
 private fun CreditSummaryCard(
     accounts: List<AccountRepository.WorkBuddyAccount>,
     credits: Map<String, WbCreditState>,
+    /** 这一组属于哪一档：两档的积分池不互通，必须各算各的 */
+    variant: WorkBuddyVariant,
     modifier: Modifier = Modifier,
 ) {
     val summary = remember(accounts, credits) {
@@ -342,7 +370,7 @@ private fun CreditSummaryCard(
     Card(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp, 14.dp)) {
             Text(
-                text = "总剩余可用积分",
+                text = "${variant.label} · ${variant.appLabel} 总剩余可用积分",
                 fontSize = 12.sp,
                 color = colorScheme.onSurfaceVariantSummary,
             )
@@ -529,11 +557,11 @@ private fun WbAccountRow(
     }
 }
 
-/** 灰色小标题 */
+/** 灰色小标题（[note] 是跟在后面的补充说明，例如"该档位暂无签到"） */
 @Composable
-private fun SectionHeader(text: String) {
+private fun SectionHeader(text: String, note: String = "") {
     Text(
-        text = text,
+        text = text + note,
         fontSize = 13.sp,
         fontWeight = FontWeight.Medium,
         color = colorScheme.onSurfaceVariantSummary,

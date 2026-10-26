@@ -36,14 +36,26 @@ import java.util.Locale
  *   而不是 `>`，否则整整 30 天的占位值漏判，到期时间普遍多算一个月。
  * - **不能带 `SlicePeriodStartTime`**：带当天切片会漏掉月度套餐包的记录，
  *   导致「套餐基础积分」显示成长期有效。
+ *
+ * ## 档位
+ *
+ * 三个接口两档同路径、不同域名（国内版 `www.codebuddy.cn`，国际版 `www.workbuddy.ai`）。
+ * 域名一律由账号的 `variant` 决定（[WorkBuddyVariant]），**不能写死国内域**：
+ * 国际版 token 打国内域只会 401，界面上看起来就是"凭据失效"。
  */
 class WorkBuddyCredits(
     private val client: OkHttpClient,
-    /** 官方 API 根。默认国内版；测试注入本地地址，生产不要改 */
-    private val origin: String = DEFAULT_ORIGIN,
+    /**
+     * 固定域名：**只给测试注入**（本地 HttpServer）。
+     *
+     * 为 null 时按账号档位取域名（国内版 `www.codebuddy.cn` / 国际版 `www.workbuddy.ai`）。
+     * 跨档位请求会拿到 401，看起来像"凭据失效"，实际是打错了地方——所以生产环境绝不传它。
+     */
+    private val originOverride: String? = null,
 ) {
 
     companion object {
+        /** 国内版官网域；仅作默认值参考，实际域名由账号档位决定 */
         const val DEFAULT_ORIGIN = "https://www.codebuddy.cn"
         private const val PATH_SUMMARY = "/billing/meter/get-user-resource-summary"
         private const val PATH_PAID = "/billing/meter/get-user-resource-paid-packages"
@@ -250,7 +262,18 @@ class WorkBuddyCredits(
         val expired: Boolean,
     )
 
-    private fun authHeaders(account: AccountRepository.WorkBuddyAccount): Map<String, String> {
+    /**
+     * 该账号所属档位的官网域。
+     *
+     * 积分 / 明细三个接口都在官网域下，两档同路径、不同域：国际版 token 打国内域只会 401。
+     */
+    private fun originOf(account: AccountRepository.WorkBuddyAccount): String =
+        originOverride ?: WorkBuddyVariant.ofAccount(account).apiEndpoint
+
+    private fun authHeaders(
+        account: AccountRepository.WorkBuddyAccount,
+        origin: String,
+    ): Map<String, String> {
         val headers = mutableMapOf(
             "Authorization" to "Bearer ${account.token.trim()}",
             "Accept" to "application/json",
@@ -285,7 +308,7 @@ class WorkBuddyCredits(
         account: AccountRepository.WorkBuddyAccount,
         path: String,
         body: JSONObject,
-    ): JSONObject = postUrl(account, origin + path, body)
+    ): JSONObject = postUrl(account, originOf(account) + path, body)
 
     private fun postUrl(
         account: AccountRepository.WorkBuddyAccount,
@@ -295,7 +318,7 @@ class WorkBuddyCredits(
         val builder = Request.Builder()
             .url(url)
             .post(body.toString().toRequestBody(jsonMedia))
-        authHeaders(account).forEach { (k, v) -> builder.header(k, v) }
+        authHeaders(account, originOf(account)).forEach { (k, v) -> builder.header(k, v) }
         client.newCall(builder.build()).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
             val json = runCatching { JSONObject(text) }.getOrNull()

@@ -41,6 +41,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import com.functy.fewards.core.workbuddy.WorkBuddyVariant
 import com.functy.fewards.fewardsApp
 import com.functy.fewards.work.TaskNotifier
 import androidx.compose.material.icons.rounded.Palette
@@ -495,31 +496,43 @@ private fun WbSyncSection(
             )
         }
 
-        uiState.wbAccounts.forEach { acc ->
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Checkbox(
-                    checked = acc.id in uiState.wbSyncSelected,
-                    onCheckedChange = { actions.onToggleWbSyncAccount(acc.id, it) },
-                    colors = CheckboxDefaults.colors(checkedColor = colorScheme.primary),
-                )
-                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                    Text(
-                        text = acc.label.ifEmpty {
-                            if (acc.uid.isNotEmpty()) "uid=${acc.uid.take(10)}" else "未命名账号"
-                        },
-                        fontSize = 14.sp,
-                        color = colorScheme.onBackground,
+        /**
+         * 按档位分组列出：国内版 / 国际版是两套独立客户端与域名，
+         * 勾选清单里混着排会让人看不出"这个账号到底要给哪一档用"。
+         */
+        WorkBuddyVariant.group(uiState.wbAccounts).forEach { (variant, list) ->
+            Text(
+                text = "${variant.label} · ${variant.appLabel}（${list.size}）",
+                fontSize = 12.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+            )
+            list.forEach { acc ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Checkbox(
+                        checked = acc.id in uiState.wbSyncSelected,
+                        onCheckedChange = { actions.onToggleWbSyncAccount(acc.id, it) },
+                        colors = CheckboxDefaults.colors(checkedColor = colorScheme.primary),
                     )
-                    val note = uiState.wbSyncResults[acc.id]
-                    if (!note.isNullOrEmpty()) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                         Text(
-                            text = note,
-                            fontSize = 11.sp,
-                            color = colorScheme.onSurfaceVariantSummary,
+                            text = acc.label.ifEmpty {
+                                if (acc.uid.isNotEmpty()) "uid=${acc.uid.take(10)}" else "未命名账号"
+                            },
+                            fontSize = 14.sp,
+                            color = colorScheme.onBackground,
                         )
+                        val note = uiState.wbSyncResults[acc.id]
+                        if (!note.isNullOrEmpty()) {
+                            Text(
+                                text = note,
+                                fontSize = 11.sp,
+                                color = colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
                     }
                 }
             }
@@ -609,7 +622,9 @@ private fun WbSyncSection(
                 "刷完记得点「同步选中账号」。\n" +
                 "· 同步选中账号：只把本机凭据推到电脑，再取回电脑端最新凭据，不刷新。\n" +
                 "· 从电脑同步凭据：手机上失效的账号去电脑端补 token；手机上没有的账号直接按电脑端" +
-                "新建过来（不必先扫码）。本机仍有效的账号不动。",
+                "新建过来（不必先扫码）。本机仍有效的账号不动。\n" +
+                "· 国内版与国际版分开显示：两档是两套客户端、两套域名，积分不互通，token 也不能混用。" +
+                "从电脑同步时会连档位一起带回来；国际版暂不支持签到与成长中心。",
             fontSize = 11.sp,
             color = colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
