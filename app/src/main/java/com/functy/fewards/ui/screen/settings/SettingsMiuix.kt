@@ -26,7 +26,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Gamepad
-import androidx.compose.material.icons.rounded.Info
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -71,8 +70,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.functy.fewards.R
 import com.functy.fewards.ui.component.miuix.MultilineInputField
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.functy.fewards.ui.viewmodel.ConfigTransferViewModel
 import com.functy.fewards.ui.theme.LocalEnableBlur
 import com.functy.fewards.ui.util.BlurredBar
 import com.functy.fewards.ui.util.rememberBlurBackdrop
@@ -87,7 +84,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.Alignment
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.TopAppBar
@@ -102,7 +98,10 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 /**
- * 设置页（Miuix）：大标题「设置」，从上到下为界面组、WorkBuddy 板块、通知与完成总览、导入导出、关于。
+ * 设置页（Miuix）：大标题「设置」，从上到下为界面组、WorkBuddy 板块、通知与完成总览。
+ *
+ * 导入 / 导出配置与「关于」两处已按产品要求移除：配置迁移改为「从电脑同步凭据」，
+ * 版本信息留在 README 与 Release 页。不要再加回来。
  */
 @Composable
 fun SettingPagerMiuix(
@@ -229,10 +228,11 @@ fun SettingPagerMiuix(
                             onCheckedChange = actions.onSetWbAutoRefresh,
                         )
                         if (uiState.wbAccounts.isNotEmpty()) {
+                            // access / refresh 是两条独立的时间线：前者过期只需换一份，
+                            // 后者过期才是真的没救，所以分开显示，不合并成一句
                             uiState.wbAccounts.forEach { acc ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 1.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp),
                                 ) {
                                     Text(
                                         text = acc.label.ifEmpty {
@@ -240,11 +240,11 @@ fun SettingPagerMiuix(
                                         },
                                         fontSize = 12.sp,
                                         color = colorScheme.onSurfaceVariantSummary,
-                                        modifier = Modifier.weight(1f),
                                     )
                                     Text(
-                                        text = wbRemaining(acc),
-                                        fontSize = 12.sp,
+                                        text = "access " + wbRemaining(acc.expiresAt) +
+                                            " · refresh " + wbRemaining(acc.refreshExpiresAt),
+                                        fontSize = 11.sp,
                                         color = colorScheme.onSurfaceVariantSummary,
                                     )
                                 }
@@ -383,88 +383,6 @@ fun SettingPagerMiuix(
                         )
                     }
 
-                    // ==================== 导入 / 导出 ====================
-                    Card(
-                        modifier = Modifier
-                            .padding(top = 12.dp)
-                            .fillMaxWidth(),
-                    ) {
-                        val transferViewModel = viewModel<ConfigTransferViewModel>()
-                        val transferStatus by transferViewModel.status.collectAsStateWithLifecycle()
-                        var importText by rememberSaveable { mutableStateOf("") }
-                        if (transferStatus.isNotEmpty()) {
-                            Text(
-                                text = transferStatus,
-                                fontSize = 12.sp,
-                                color = colorScheme.onSurfaceVariantSummary,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                            )
-                        }
-                        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                            TextButton(
-                                text = "导出配置",
-                                onClick = {
-                                    dismissInput()
-                                    transferViewModel.exportToClipboard()
-                                },
-                                modifier = Modifier.weight(1f),
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            TextButton(
-                                text = "从剪贴板导入",
-                                onClick = {
-                                    dismissInput()
-                                    transferViewModel.importFromClipboard()
-                                },
-                                colors = ButtonDefaults.textButtonColorsPrimary(),
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            MultilineInputField(
-                                value = importText,
-                                onValueChange = { importText = it },
-                                label = "粘贴配置 JSON / Cookie / Token 导入",
-                                modifier = Modifier.weight(1f),
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            TextButton(
-                                text = "导入",
-                                onClick = {
-                                    transferViewModel.importFromText(importText)
-                                    importText = ""
-                                    dismissInput()
-                                },
-                                colors = ButtonDefaults.textButtonColorsPrimary(),
-                            )
-                        }
-                    }
-
-                    // ==================== 关于 ====================
-                    Card(
-                        modifier = Modifier
-                            .padding(vertical = 12.dp)
-                            .fillMaxWidth(),
-                    ) {
-                        ArrowPreference(
-                            title = stringResource(id = R.string.about),
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.Info,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = stringResource(id = R.string.about),
-                                    tint = colorScheme.onBackground
-                                )
-                            },
-                            onClick = {
-                                dismissInput()
-                                actions.onOpenAbout()
-                            },
-                        )
-                    }
                     Spacer(Modifier.height(bottomInnerPadding))
                 }
             }
@@ -690,8 +608,8 @@ private fun WbSyncSection(
                 "· 刷新选中账号：只续本机凭据，不碰电脑。会换掉 refresh_token，电脑端那份随即失效，" +
                 "刷完记得点「同步选中账号」。\n" +
                 "· 同步选中账号：只把本机凭据推到电脑，再取回电脑端最新凭据，不刷新。\n" +
-                "· 从电脑同步凭据：手机上已失效的账号，去电脑端把仍有效的 token 读回来；" +
-                "有效的账号不动，只写 token 数据。",
+                "· 从电脑同步凭据：手机上失效的账号去电脑端补 token；手机上没有的账号直接按电脑端" +
+                "新建过来（不必先扫码）。本机仍有效的账号不动。",
             fontSize = 11.sp,
             color = colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -705,9 +623,9 @@ private fun WbSyncSection(
  * `expiresAt` 是**秒**（扫码时 `currentTimeMillis()/1000 + expiresIn`），这里换成毫秒再比。
  * 0 表示账号里没有这个字段——是"判断不了"，不能当成已过期。
  */
-private fun wbRemaining(acc: com.functy.fewards.data.repository.AccountRepository.WorkBuddyAccount): String {
-    if (acc.expiresAt <= 0) return "有效期未知"
-    val hours = (acc.expiresAt * 1000 - System.currentTimeMillis()) / 3_600_000.0
+private fun wbRemaining(expiresAtSec: Long): String {
+    if (expiresAtSec <= 0) return "未知"
+    val hours = (expiresAtSec * 1000 - System.currentTimeMillis()) / 3_600_000.0
     return when {
         hours <= 0 -> "已过期"
         hours < 48 -> "剩余 " + String.format(java.util.Locale.US, "%.1f", hours) + " 小时"

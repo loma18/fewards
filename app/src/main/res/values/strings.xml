@@ -19,10 +19,6 @@
     <string name="home_running">执行中…</string>
     <string name="home_log_title">日志</string>
     <string name="home_no_logs">暂无日志</string>
-    <string name="home_support_title">支持项目</string>
-    <string name="home_support_content">Fewards 是一款免费开源的自动签到工具，如果它对你有帮助，欢迎支持开发者。</string>
-    <string name="home_learn_more">了解更多</string>
-    <string name="home_learn_more_content">了解 Fewards 的使用方式与自动签到的实现原理。</string>
     <string name="workbuddy">WorkBuddy</string>
 
     <!-- 账号页 -->
@@ -95,7 +91,6 @@
     <string name="confirm">确定</string>
     <string name="cancel">取消</string>
     <string name="ok">好</string>
-    <string name="about">关于</string>
 
     <!-- 颜色名 -->
     <string name="color_red">红色</string>
@@ -113,7 +108,6 @@
     <string name="color_brown">棕色</string>
     <string name="color_blue_grey">蓝灰</string>
     <string name="color_sakura">樱色</string>
-    <string name="about_source_code"><![CDATA[查看源代码：%1$s<br/>%2$s]]></string>
     <string name="notify_running">正在执行签到任务</string>
     <string name="notify_all_done">今日任务全部完成</string>
     <string name="notify_done_with_error">签到完成（存在失败项）</string>

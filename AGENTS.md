@@ -88,7 +88,7 @@ cp app/build/outputs/apk/release/app-release.apk ~/Downloads/Fewards-<versionNam
 - miuix 坐标必须带 `-android` 后缀（`miuix-ui-android` 等）。
 - **导航库互斥**：用 `top.yukonga.miuix.kmp:miuix-nav-android`（`miuixNav`）。`miuix-navigation3-ui-android` 的包名覆盖 `androidx.navigation3.ui`，与 `androidx.navigation3:navigation3-ui` **二选一**；两个都留会 Duplicate class。本仓只要 `miuix-nav` + `androidx.navigation3:navigation3-runtime`。
 - Room / DataStore 在 gradle 里有坐标，**源码未使用**。设置与账号走 SharedPreferences。不要顺手接 Room。
-- 已删除 commonmark / webkit 依赖，不要为「关于页 Markdown」加回来。
+- 已删除 commonmark / webkit 依赖；「关于」页与配置导入导出整块也已删除，不要为它们加回来。
 
 ## 目录
 
@@ -97,10 +97,10 @@ app/src/main/java/com/functy/fewards/
   FewardsApplication.kt   # okhttp、今日状态水合、WorkManager Configuration.Provider
   core/workbuddy/         # 签到 engine、成长中心、积分、扫码协议、凭据刷新、JWT 标签
   core/lansync/           # 局域网同步：协议、HTTP 客户端
-  data/repository/        # settings、accounts、config transfer
-  ui/screen/              # home, account, settings, colorpalette, about（全 Miuix）
+  data/repository/        # settings、accounts
+  ui/screen/              # home, account, settings, colorpalette（全 Miuix）
   ui/viewmodel/           # TaskRunner = 执行逻辑；入队不在这里
-  ui/navigation/          # Route.Main / About / ColorPalette
+  ui/navigation/          # Route.Main / ColorPalette
   work/                   # TaskWorker 入队、通知、NotificationActionReceiver、QS Tile
 scripts/workbuddy-token.sh
 .github/workflows/test.yml
@@ -155,10 +155,14 @@ app/src/test/java/com/functy/fewards/
   3 日 / 5 日是独立口径（5 日包含 3 日，所以 3 日的数不会超过 5 日）；缺 uid 的账号跳过，
   不进"查询中"的计数。
 - **刷新与同步**：refresh_token 是轮换式的，刷新成功后旧值立刻作废。设置页拆成三个动作，别再合并：
-  「刷新选中账号」只刷本机（会轮换，刷完要用户自己推）、「同步选中账号」只做 **推送 → 取回**、
-  「从电脑同步凭据」只针对手机上已失效的账号、把电脑端仍有效的 token 读回来（只写 token 字段，
-  label / 头像不动）。"失效"的判定统一走 `CredentialHealth`（`expiresAt` 是秒，0 = 不知道，
-  不能当已过期）。
+  「刷新选中账号」只刷本机（会轮换，刷完要用户自己推）、「同步选中账号」只做 **推送 → 取回**
+  （电脑端没有的账号由电脑端的合并规则 `create` 落库，所以手机推过去就等于在电脑端建号）、
+  「从电脑同步凭据」按电脑端全量走：手机上**已失效**的账号补 token，手机上**没有**的账号直接建号
+  （不必先扫码），手机上仍有效的账号一律不动，已有账号只写 token 字段（label / 头像不动）。
+  "失效"的判定统一走 `CredentialHealth`（`expiresAt` 是秒，0 = 不知道，不能当已过期）。
+- **两个过期时间不能混**：`expiresAt` 是 access 的（几小时），`refreshExpiresAt` 是 refresh 的
+  （几十天）。access 过期只需换一份，refresh 过期才是真的没救。账号页「查看凭据详情」与设置页
+  的凭据列表都必须**分开显示**，不许用一句"有效期至"顶替；0 要显示"未知"（写成 1970 会被当成已过期）。
   电脑端 `POST /api/lansync/fetch` 是**只读**端点，一行都不写账号库；旧版控制台没有它（404）时
   手机端退化成一次 `obtainedAt = 0` 的只读推送——这个 0 是让电脑端走"新鲜度未知 → 保留本地"，
   不要换成真实时间戳，否则可能用手机端的死凭据覆盖电脑端。
@@ -167,8 +171,8 @@ app/src/test/java/com/functy/fewards/
 ## 账号与配置
 
 - 凭据只存在本机 SharedPreferences（`AccountRepository` / `SettingsRepositoryImpl`）。日志禁止打印 token / cookie / stoken。
-- 配置 JSON：`_format=fewards-config`，`ConfigTransferParser` + `ConfigTransferRepository`。只处理 `workbuddies`，兼容裸 JWT。
-  旧备份里的 `mihoyos` / `bings` 会被**忽略并提示条数**（不要改成报错）；裸 Cookie 走「米游社已移除」的明确提示。
+- 配置导入导出（`ConfigTransferParser` / `ConfigTransferRepository` / 设置页「导入 / 导出配置」卡片）**已整体移除**：
+  迁移账号现在走「从电脑同步凭据」。不要再加回来，也不要恢复 `_format=fewards-config` 备份格式。
 - 输入框用 miuix `basic.TextField`（`MultilineInputField` 包装）。不要用已删除的 `EditText.kt`。
 - **WorkBuddy 多账号**：`WorkBuddyAccount` 带 `uid/enterpriseId/refreshToken/expiresAt`（老数据没有这些字段，读出来是空/0）。
   - `AccountRepository.addWorkBuddyAccount` 去重顺序：同 `uid` → 老账号（uid 空）同 `label` → 同 `id`；命中原地替换，不新增。**不要退回「只按 id 去重」**，否则同一账号重复扫码会多出一条。
@@ -219,12 +223,15 @@ app/src/test/java/com/functy/fewards/
 - `EditText.kt`、`WarningCard.kt`、`ScrollToTop.kt`、`ThemeExt.kt`、`ui/util/Colors.kt`、`MonetColorsProvider`
 - 未使用的 strings（预测返回开关、定时、导航徽标）
 - 米游社 / 微软积分（`core/mihoyo`、`core/bing`、`BingAuthWebView`、对应设置项与字符串、`docs/bing-rewards.md`）
+- 首页「支持项目」「了解更多」两张卡片（`SupportLinks`，`home_support_*` / `home_learn_more*` 字符串）
+- 设置页「关于」（`Route.About`、`ui/screen/about/`、`about` / `about_source_code` 字符串）
+- 设置页「导入 / 导出配置」（`ConfigTransferViewModel` / `ConfigTransferRepository` / `ConfigTransferParser` 与其测试）
 
 ## 测试
 
 `./gradlew :app:testDebugUnitTest`，CI：`.github/workflows/test.yml`。
 
-改了下面这些必须有/更新 JVM 测试：WorkBuddy `interpretDailyCheckin`、扫码协议（`WorkBuddyLoginTest`：信封 code 优先、11217 视为等待、驼峰字段、缺 uid 未就绪、缺 code 不算成功）、JWT 的 uid/exp（`WorkBuddyLabelTest`）、成长中心补登日历（`WorkBuddyGrowthTest`）、积分解析与到期口径（`WorkBuddyCreditsTest`）、积分统计（`CreditStatsTest`）、同步协议与客户端（`LanSyncProtocolTest` / `LanSyncClientTest`）、凭据有效性判定（`CredentialHealthTest`）、`ConfigTransferParser`。
+改了下面这些必须有/更新 JVM 测试：WorkBuddy `interpretDailyCheckin`、扫码协议（`WorkBuddyLoginTest`：信封 code 优先、11217 视为等待、驼峰字段、缺 uid 未就绪、缺 code 不算成功）、JWT 的 uid/exp（`WorkBuddyLabelTest`）、成长中心补登日历（`WorkBuddyGrowthTest`）、积分解析与到期口径（`WorkBuddyCreditsTest`）、积分统计（`CreditStatsTest`）、同步协议与客户端（`LanSyncProtocolTest` / `LanSyncClientTest`）、凭据有效性判定（`CredentialHealthTest`）、凭据展示格式（`WbCredentialFormatTest`）。
 
 `CreditStatsTest` 钉的是账页顶部汇总的口径，改动前先看注释：只算未过期额度、已用完的包不算"即将到期"、
 3 日与 5 日是独立口径（5 日包含 3 日）、缺 uid 的账号跳过。`HomeSummaryTest` 钉首页可见性与完成判定。

@@ -103,12 +103,19 @@ WorkBuddy's `refresh_token` is **rotating**: one successful refresh invalidates 
 | Button | What it does | Cost |
 |---|---|---|
 | **刷新选中账号** | Calls the official refresh endpoint with each selected account's `refresh_token`. Local only — nothing is sent to the desktop. | **Rotates the token**: the desktop's copy dies immediately. Push right after. |
-| **同步选中账号** | Pushes the current credentials to the desktop, then pulls back whatever the desktop returns (it may have refreshed some accounts itself). Never refreshes. | Free — no token changes. |
-| **从电脑同步凭据** | For accounts whose token is **dead on the phone**, reads the still-valid token back from the desktop. Valid accounts are never touched; only token fields are written. | Free — the desktop is read-only for this call. |
+| **同步选中账号** | Pushes the current credentials to the desktop, then pulls back whatever the desktop returns (it may have refreshed some accounts itself). Accounts the desktop doesn't know yet are **created there** by the same call. Never refreshes. | Free — no token changes. |
+| **从电脑同步凭据** | Pulls credentials from the desktop: accounts that are **dead on the phone** get their token filled in, and accounts that **don't exist on the phone at all** are created from the desktop copy (no QR scan needed). Accounts still valid locally are never touched. | Free — the desktop is read-only for this call. |
 
 Why refresh is a separate button: a refresh **rotates** the token, so the desktop's copy dies the moment it succeeds. Merging refresh into the sync button meant every "just push what I have" click also cost a rotation. Split apart, each button does exactly one thing — just remember that after a refresh the desktop holds a dead copy until you push.
 
-**从电脑同步凭据** has three hard rules: only accounts that are already dead on the phone are considered, the desktop's credential must still be valid, and only token data (access / refresh / expiry) is written — label, avatar and enterprise info stay untouched.
+**从电脑同步凭据** has four hard rules: the desktop's credential must still be valid, accounts still valid on the phone are left alone, only token data (access / refresh / both expiries) is written for existing accounts, and encrypted-envelope accounts are skipped (no plaintext to copy).
+
+### Inspecting credentials
+
+`access_token` and `refresh_token` expire at **different times**: the access token lives for hours, the refresh token for weeks, and only the latter is fatal when it runs out. Both apps show them separately:
+
+- **Phone** — account page → each account → **查看凭据详情**: masked access / refresh tokens plus `到期` for each (tap to reveal the full values).
+- **Desktop** — accounts page → each card shows `access MM/DD HH:mm · refresh MM/DD HH:mm`, and the **凭据** button opens a dialog with the full tokens and both expiry times (fetched on demand; the list API never carries plaintext).
 
 The desktop side exposes this as a **read-only** `POST /api/lansync/fetch` (it never writes its account store). Against an older console without that endpoint, the phone degrades to a "read-only push" (`obtainedAt = 0` makes the desktop keep its own copy) and still works.
 
@@ -145,8 +152,8 @@ Toolchain: AGP 9.4.0 / Kotlin 2.4.10 / Compose BOM 2026.08.00 / miuix 0.9.4 / mi
 app/src/main/java/com/functy/fewards/
 ├── core/workbuddy/       # check-in engine, growth center, credits, QR authorization, refresh
 ├── core/lansync/         # LAN sync protocol and HTTP client
-├── data/repository/      # settings, accounts, config import/export
-├── ui/screen/            # home / accounts / settings / theme / about (Miuix)
+├── data/repository/      # settings, accounts
+├── ui/screen/            # home / accounts / settings / theme (Miuix)
 ├── ui/viewmodel/
 └── work/                 # WorkManager workers, notifications
 ```

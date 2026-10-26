@@ -64,6 +64,13 @@ object LanSyncProtocol {
         val encrypted: Boolean = false,
         /** 毫秒：电脑端最近一次刷新该凭据的时刻，0 = 未知 */
         val refreshedAt: Long = 0L,
+        /**
+         * 企业 id。
+         *
+         * 「从电脑同步凭据」会把电脑端有、手机端没有的账号直接建到本机，
+         * 建号时缺这个字段会在多企业账号上表现出"少了一条归属"。
+         */
+        val enterpriseId: String = "",
     )
 
     /** 单条裁决结果 */
@@ -225,6 +232,7 @@ object LanSyncProtocol {
         version = o.optLong("version"),
         encrypted = o.optBoolean("encrypted", false),
         refreshedAt = o.optLong("refreshedAt"),
+        enterpriseId = o.optString("enterpriseId"),
     )
 
     /** 解析待同步队列 */

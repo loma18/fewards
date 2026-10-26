@@ -55,7 +55,6 @@ import com.functy.fewards.ui.navigation.LocalNavigator
 import com.functy.fewards.ui.navigation.Navigator
 import com.functy.fewards.ui.navigation.Route
 import com.functy.fewards.ui.screen.account.AccountPager
-import com.functy.fewards.ui.screen.about.AboutScreen
 import com.functy.fewards.ui.screen.colorpalette.ColorPaletteScreen
 import com.functy.fewards.ui.screen.home.HomePager
 import com.functy.fewards.ui.screen.settings.SettingPager
@@ -169,11 +168,6 @@ class MainActivity : ComponentActivity() {
                         ) {
                             entry<Route.Main> { mainScreenEntry() }
                             // 入场层第一帧就铺满 surface，盖住库 scrim 首帧 alpha=1 的全黑。
-                            entry<Route.About> {
-                                Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface)) {
-                                    AboutScreen()
-                                }
-                            }
                             entry<Route.ColorPalette> {
                                 Box(Modifier.fillMaxSize().background(MiuixTheme.colorScheme.surface)) {
                                     ColorPaletteScreen()

@@ -59,8 +59,8 @@ Kotlin + Jetpack Compose，界面全程 **Miuix**（HyperOS 风格）。
 | **WorkBuddy 签到** | 微信 / QQ 扫码授权或粘贴桌面端 accessToken；每日积分自动签到 |
 | **成长中心** | 旅行礼物 / 派 Buddy / 任务 / 断登补签 / 连登兑换 / 盲盒，签到后自动跑，也可手动「一键领取」 |
 | **积分** | 每个账号的余额与积分包到期，账号页顶部汇总**总剩余可用积分**以及 **3 日 / 5 日内到期**的可用积分（每个账号行内也有） |
-| **凭据维护** | 临期自动刷新（可关）+「检查并刷新」+ 各账号剩余有效期 |
-| **设备同步** | 与电脑端 workbuddy-console 局域网配对：刷新 / 推送取回 / 从电脑补凭据三件事分开做，两端共用一条 refresh_token 链 |
+| **凭据维护** | 临期自动刷新（可关）+「检查并刷新」+ 各账号 access / refresh 各自的到期时间；账号页可展开看完整 token |
+| **设备同步** | 与电脑端 workbuddy-console 局域网配对：刷新 / 推送取回 / 从电脑补凭据三件事分开做（手机上没有的账号直接按电脑端新建），两端共用一条 refresh_token 链 |
 
 - **多账号** — 同一账号重复授权按 uid 更新而非新增
 - **一条链路** — 首页「开始执行」与控制中心「签到」磁贴走同一套流程，执行中实时进度通知
@@ -100,11 +100,10 @@ chmod +x scripts/workbuddy-token.sh
 
 ```
 app/src/main/java/com/functy/fewards/
-├── core/mihoyo/          # DS 签名、常量、HTTP、引擎
 ├── core/workbuddy/       # 签到引擎、扫码授权协议
 ├── core/lansync/         # 局域网同步协议与客户端
-├── data/repository/      # 设置、账号、配置导入导出
-├── ui/screen/            # 主页 / 账号 / 设置 / 主题 / 关于（Miuix）
+├── data/repository/      # 设置、账号
+├── ui/screen/            # 主页 / 账号 / 设置 / 主题（Miuix）
 ├── ui/viewmodel/
 └── work/                 # WorkManager worker、通知
 ```

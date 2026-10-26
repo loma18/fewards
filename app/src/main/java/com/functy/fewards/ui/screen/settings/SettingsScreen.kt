@@ -48,7 +48,6 @@ fun SettingPager(
         onSetTaskNotification = viewModel::setTaskNotification,
         onSetOverviewAutoDismiss = viewModel::setOverviewAutoDismiss,
         onSetOverviewHoldSeconds = viewModel::setOverviewHoldSeconds,
-        onOpenAbout = { navigator.push(Route.About) },
     )
 
     SettingPagerMiuix(uiState, actions, bottomInnerPadding)

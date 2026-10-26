@@ -374,15 +374,17 @@ class SettingsViewModel(
     }
 
     /**
-     * 从电脑同步凭据：**只补手机上已失效的账号**，且只写凭据字段。
+     * 从电脑同步凭据：**手机端失效的账号补 token，电脑端有而手机端没有的账号直接建号**。
      *
-     * 典型场景：手机端 access token 过期了（连签到都做不了），而电脑端那个账号还活着。
-     * 重新扫码代价太大，直接把电脑端的 token 读回来即可。
+     * 典型场景有两个：
+     * 1. 手机端 access token 过期了（连签到都做不了），而电脑端那个账号还活着；
+     * 2. 手机上根本没添加过这个账号——以前必须先扫码或粘贴才能同步，现在一次点击就建好。
      *
-     * 三条硬约束（写在这里，防止以后被"顺手优化"掉）：
-     * 1. **只处理失效账号**：还有效的账号一律不碰，避免把能用的凭据换成别处的旧值；
-     * 2. **只写 token 数据**：label / 头像 / 企业信息留在本机不动（`updateWorkBuddyCredential` 保证）；
-     * 3. **电脑端那份也必须有效**：电脑端也可能早就过期，写回去只会造成"看起来正常"的假象。
+     * 四条硬约束（写在这里，防止以后被"顺手优化"掉）：
+     * 1. **不覆盖有效凭据**：手机端还有效的账号一律不碰，避免把能用的 token 换成别处的旧值；
+     * 2. **电脑端那份也必须有效**：电脑端也可能早就过期，写回去只会造成"看起来正常"的假象；
+     * 3. **只写 token 数据**：已有账号只动 access / refresh / 过期时间，label、头像、企业信息保留；
+     * 4. **加密信封不处理**：电脑端拿不出明文，建号只会多一条永远刷不动的死记录。
      */
     fun pullCredentialsFromComputer() {
         if (_uiState.value.wbSyncBusy) return
@@ -398,53 +400,64 @@ class SettingsViewModel(
                 _uiState.update { it.copy(wbSyncStatus = "未填配对码，请先填电脑端设置页显示的 8 位数字") }
                 return@launch
             }
-            val all = accounts.workBuddyAccounts()
-            if (all.isEmpty()) {
-                _uiState.update { it.copy(wbSyncStatus = "还没有 WorkBuddy 账号，先到账号页扫码或导入") }
-                return@launch
-            }
-            val now = System.currentTimeMillis()
-            val dead = all.filter { CredentialHealth.isDead(it.token, it.expiresAt, now) }
-            if (dead.isEmpty()) {
-                _uiState.update {
-                    it.copy(wbSyncStatus = "本机 ${all.size} 个账号都还有效，无需从电脑同步")
-                }
-                return@launch
-            }
 
             _uiState.update {
                 it.copy(
                     wbSyncBusy = true,
                     wbSyncMode = WbSyncMode.Pull,
                     wbSyncResults = emptyMap(),
-                    wbSyncStatus = "正在从电脑读取 ${dead.size} 个失效账号的凭据…",
+                    wbSyncStatus = "正在从电脑读取账号凭据…",
                 )
             }
 
             try {
-                val remotes = fetchRemoteCredentials(
-                    endpoint = endpoint,
-                    pairCode = state.wbSyncPairCode,
-                    dead = dead,
-                )
+                val local = accounts.workBuddyAccounts()
+                val fetched = fetchRemoteCredentials(endpoint, state.wbSyncPairCode, local)
+                val now = System.currentTimeMillis()
                 val results = LinkedHashMap<String, String>()
-                var applied = 0
+                var added = 0
+                var filled = 0
+                var kept = 0
                 var skipped = 0
-                dead.forEach { acc ->
-                    val key = acc.uid.ifEmpty { acc.id }
-                    val remote = remotes[key]
+
+                fetched.remotes.values.forEach { remote ->
+                    val key = remote.uid
+                    if (key.isEmpty()) {
+                        skipped++
+                        return@forEach
+                    }
+                    val existing = local.firstOrNull { it.uid == key || it.id == key }
                     val note = when {
-                        remote == null -> {
-                            skipped++
-                            "电脑端没有这个账号"
-                        }
                         remote.encrypted || (remote.token.isEmpty() && remote.refreshToken.isEmpty()) -> {
                             skipped++
                             "电脑端是加密凭据，取不出明文"
                         }
                         !CredentialHealth.isUsable(remote.token, remote.expiresAt, now) -> {
                             skipped++
-                            "电脑端凭据也已失效，需重新扫码"
+                            "电脑端凭据已失效"
+                        }
+                        // 电脑端有、手机端没有 → 直接建号，省掉"先在手机上添加账号"这一步
+                        existing == null -> {
+                            accounts.addWorkBuddyAccount(
+                                AccountRepository.WorkBuddyAccount(
+                                    id = key,
+                                    label = remote.label.ifEmpty { "uid=${key.take(10)}" },
+                                    token = remote.token,
+                                    uid = key,
+                                    enterpriseId = remote.enterpriseId,
+                                    refreshToken = remote.refreshToken,
+                                    expiresAt = remote.expiresAt,
+                                    obtainedAt = now,
+                                    refreshExpiresAt = remote.refreshExpiresAt,
+                                    syncVersion = remote.version,
+                                )
+                            )
+                            added++
+                            "已从电脑新增"
+                        }
+                        !CredentialHealth.isDead(existing.token, existing.expiresAt, now) -> {
+                            kept++
+                            "本机仍有效，未改动"
                         }
                         else -> {
                             val ok = accounts.updateWorkBuddyCredential(
@@ -453,33 +466,51 @@ class SettingsViewModel(
                                 refreshToken = remote.refreshToken,
                                 expiresAt = remote.expiresAt,
                                 refreshExpiresAt = remote.refreshExpiresAt,
-                                obtainedAt = System.currentTimeMillis(),
+                                obtainedAt = now,
                                 syncVersion = remote.version,
                             )
                             if (ok) {
-                                applied++
-                                "已从电脑同步"
+                                filled++
+                                "已从电脑补全"
                             } else {
                                 skipped++
                                 "本机已找不到该账号"
                             }
                         }
                     }
-                    results[acc.id] = note
-                    _uiState.update { it.copy(wbSyncResults = results.toMap()) }
+                    results[existing?.id ?: key] = note
                 }
 
-                val now2 = System.currentTimeMillis()
-                val summary = buildString {
-                    append("从电脑同步完成：写入 $applied 个")
-                    if (skipped > 0) append("，跳过 $skipped 个")
+                // 手机端失效、电脑端也没有的账号：明确点出来，别让用户以为同步漏了
+                if (!fetched.fallback) {
+                    local.forEach { acc ->
+                        val key = acc.uid.ifEmpty { acc.id }
+                        if (!fetched.remotes.containsKey(key) &&
+                            CredentialHealth.isDead(acc.token, acc.expiresAt, now)
+                        ) {
+                            results[acc.id] = "电脑端没有这个账号"
+                            skipped++
+                        }
+                    }
                 }
-                repo.wbSyncLastAt = now2
+
+                val stamp = System.currentTimeMillis()
+                val summary = buildString {
+                    append("从电脑同步完成：新增 $added 个")
+                    if (filled > 0) append("，补全 $filled 个")
+                    if (kept > 0) append("，$kept 个本机仍有效未改动")
+                    if (skipped > 0) append("，跳过 $skipped 个")
+                    if (added == 0 && filled == 0 && skipped == 0) append("，两端已经一致")
+                    if (fetched.fallback) {
+                        append("。电脑端控制台版本较旧：只能补已有账号，列不出电脑端全部账号")
+                    }
+                }
+                repo.wbSyncLastAt = stamp
                 _uiState.update {
                     it.copy(
                         wbSyncBusy = false,
                         wbSyncMode = WbSyncMode.None,
-                        wbSyncLastAt = now2,
+                        wbSyncLastAt = stamp,
                         wbSyncResults = results,
                         wbSyncStatus = summary,
                     )
@@ -505,28 +536,37 @@ class SettingsViewModel(
         }
     }
 
+    /** 一次"从电脑读凭据"的结果 */
+    private data class RemoteCredentials(
+        /** 电脑端 uid → 凭据 */
+        val remotes: Map<String, LanSyncProtocol.Remote>,
+        /** 旧版控制台没有 /fetch，退化成了只读推送：拿不到"电脑端全量账号" */
+        val fallback: Boolean,
+    )
+
     /**
-     * 读出电脑端这些账号的凭据（只读）。
+     * 读出电脑端的凭据（只读）。
      *
-     * 优先用 `/api/lansync/fetch`：电脑端不落库，纯读取。
+     * 优先用 `/api/lansync/fetch`（uid 传空 = 全量）：电脑端不落库，纯读取，且能把
+     * "手机上还没有的账号"一并带回来。
+     *
      * 旧版控制台没有这个端点（404）时退化成一次"只读推送"——
-     * `obtainedAt = 0` 会让电脑端走进"远端新鲜度未知 → 保留本地"分支，
-     * 因此它不会覆盖电脑端的凭据，只是借这次往返把电脑端的值带回来。
-     * 唯一的副作用：电脑端**本来就没有**该账号时会按 `create` 新建一条（等同于
-     * 正常推送的行为），已有账号不受影响。
-     *
-     * @return 账号 uid → 电脑端凭据；电脑端没有的账号不会出现在结果里
+     * `obtainedAt = 0` 会让电脑端走进"远端新鲜度未知 → 保留本地"分支，因此它不会覆盖
+     * 电脑端凭据，只是借这次往返把电脑端的值带回来。代价是只能问"手机已有的账号"，
+     * 列不出电脑端多出来的那些，所以 [RemoteCredentials.fallback] 要如实告诉界面。
      */
     private suspend fun fetchRemoteCredentials(
         endpoint: LanSyncProtocol.Endpoint,
         pairCode: String,
-        dead: List<com.functy.fewards.data.repository.AccountRepository.WorkBuddyAccount>,
-    ): Map<String, LanSyncProtocol.Remote> {
-        val keys = dead.map { it.uid.ifEmpty { it.id } }
+        local: List<AccountRepository.WorkBuddyAccount>,
+    ): RemoteCredentials {
         val remotes = try {
-            syncClient.fetch(endpoint, pairCode, keys)
+            syncClient.fetch(endpoint, pairCode, emptyList())
         } catch (e: LanSyncClient.LanSyncException) {
             if (e.code != 404) throw e
+            val now = System.currentTimeMillis()
+            val dead = local.filter { CredentialHealth.isDead(it.token, it.expiresAt, now) }
+            if (dead.isEmpty()) return RemoteCredentials(emptyMap(), fallback = true)
             val resp = syncClient.push(
                 endpoint = endpoint,
                 pairCode = pairCode,
@@ -545,13 +585,20 @@ class SettingsViewModel(
                 deviceName = deviceName(),
                 force = false,
             )
-            resp.results.mapNotNull { r -> r.account }
+            val out = LinkedHashMap<String, LanSyncProtocol.Remote>()
+            resp.results.forEach { r ->
+                val acc = r.account ?: return@forEach
+                val key = acc.uid.ifEmpty { r.uid }
+                if (key.isNotEmpty()) out[key] = acc.copy(uid = key)
+            }
+            // 电脑端本来就没有的账号会按 create 新建一条（等同于普通推送），已有账号不受影响
+            return RemoteCredentials(out, fallback = true)
         }
         val out = LinkedHashMap<String, LanSyncProtocol.Remote>()
         remotes.forEach { r ->
             if (r.uid.isNotEmpty()) out[r.uid] = r
         }
-        return out
+        return RemoteCredentials(out, fallback = false)
     }
 
     /** 一次刷新的结果 */
@@ -705,12 +752,15 @@ class SettingsViewModel(
             )
 
             var written = 0
+            // 电脑端本来没有、这次新写进去的账号数：合并规则里叫 create
+            var created = 0
             val perAccount = LinkedHashMap<String, String>()
             // 电脑端按 uid 回传，界面按本机账号 id 取结果：先建一张反查表，否则提示永远显示不出来
             val localIdByKey = list.associate { it.uid.ifEmpty { it.id } to it.id }
             resp.results.forEach { r ->
                 val acc = r.account
                 val key = localIdByKey[r.uid] ?: r.uid
+                if (r.action == "create") created++
                 if (acc == null || (acc.token.isEmpty() && acc.refreshToken.isEmpty())) {
                     perAccount[key] = describe(r.action)
                     return@forEach
@@ -743,8 +793,11 @@ class SettingsViewModel(
                     wbSyncMode = WbSyncMode.None,
                     wbSyncLastAt = now,
                     wbSyncResults = perAccount,
-                    wbSyncStatus = "已同步 $written 个" +
-                        if (pulled > 0) "，并取回 $pulled 个电脑端刷新结果" else "",
+                    wbSyncStatus = buildString {
+                        append("已同步 $written 个")
+                        if (created > 0) append("（电脑端新建 $created 个）")
+                        if (pulled > 0) append("，并取回 $pulled 个电脑端刷新结果")
+                    },
                 )
             }
             refresh()

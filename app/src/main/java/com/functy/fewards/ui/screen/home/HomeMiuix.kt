@@ -22,14 +22,11 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material.icons.filled.VolunteerActivism
 import androidx.compose.material.icons.rounded.CheckCircleOutline
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Sync
@@ -65,7 +62,6 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TopAppBar
-import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
@@ -140,7 +136,6 @@ fun HomePagerMiuix(
                         logs = logs.map { it.format() },
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    SupportLinks(modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(bottomInnerPadding))
                 }
             }
@@ -469,36 +464,3 @@ private fun LogCard(
     }
 }
 
-/** KSU SupportLinks 原样，链接指向 Fewards GitHub 仓库。 */
-@Composable
-private fun SupportLinks(modifier: Modifier = Modifier) {
-    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-    Card(modifier = modifier) {
-        ArrowPreference(
-            title = stringResource(R.string.home_support_title),
-            summary = stringResource(R.string.home_support_content),
-            startAction = {
-                Icon(
-                    imageVector = Icons.Filled.VolunteerActivism,
-                    contentDescription = stringResource(R.string.home_support_title),
-                    modifier = Modifier.padding(end = 6.dp),
-                    tint = colorScheme.onBackground,
-                )
-            },
-            onClick = { uriHandler.openUri("https://github.com/functy23/fewards") },
-        )
-        ArrowPreference(
-            title = stringResource(R.string.home_learn_more),
-            summary = stringResource(R.string.home_learn_more_content),
-            startAction = {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.MenuBook,
-                    contentDescription = stringResource(R.string.home_learn_more),
-                    modifier = Modifier.padding(end = 6.dp),
-                    tint = colorScheme.onBackground,
-                )
-            },
-            onClick = { uriHandler.openUri("https://github.com/functy23/fewards/blob/main/README.md") },
-        )
-    }
-}

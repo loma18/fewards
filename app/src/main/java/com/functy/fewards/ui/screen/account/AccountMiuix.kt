@@ -2,6 +2,7 @@ package com.functy.fewards.ui.screen.account
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -61,6 +62,7 @@ import com.functy.fewards.R
 import com.functy.fewards.core.workbuddy.WorkBuddyCredits
 import com.functy.fewards.data.repository.AccountRepository
 import com.functy.fewards.ui.component.IconSquircleCornerFraction
+import com.functy.fewards.ui.component.WbCredentialBlock
 import com.functy.fewards.ui.component.miuix.AddAccountDialog
 import com.functy.fewards.ui.component.miuix.WbCreditsDialog
 import com.functy.fewards.ui.viewmodel.AccountViewModel
@@ -424,6 +426,10 @@ private fun WbAccountRow(
         else -> "正在查询积分…"
     }
 
+    // 凭据详情默认展开：这个区块存在的意义就是"打开就能看到 access / refresh 与到期时间"，
+    // 默认收起等于没做。token 本身仍是掩码，点一下才铺开完整值（近千字符会把列表撑爆）。
+    var showCredential by remember(account.id) { mutableStateOf(true) }
+    Column(modifier = Modifier.fillMaxWidth()) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -488,6 +494,16 @@ private fun WbAccountRow(
                 tint = colorScheme.onSurfaceVariantSummary,
             )
         }
+    }
+        Text(
+            text = if (showCredential) "收起凭据详情" else "查看凭据详情（access / refresh / 到期）",
+            fontSize = 11.sp,
+            color = colorScheme.primary,
+            modifier = Modifier
+                .clickable { showCredential = !showCredential }
+                .padding(start = 46.dp, end = 6.dp, bottom = 8.dp),
+        )
+        if (showCredential) WbCredentialBlock(account)
     }
 }
 

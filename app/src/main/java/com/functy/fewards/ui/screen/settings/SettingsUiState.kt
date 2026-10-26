@@ -99,8 +99,6 @@ data class SettingsScreenActions(
     val onSetTaskNotification: (Boolean) -> Unit,
     val onSetOverviewAutoDismiss: (Boolean) -> Unit,
     val onSetOverviewHoldSeconds: (Float) -> Unit,
-    // 其他
-    val onOpenAbout: () -> Unit,
 )
 
 internal val OVERVIEW_HOLD_PRESETS = listOf(0.1f, 0.3f, 0.5f, 1.0f)
