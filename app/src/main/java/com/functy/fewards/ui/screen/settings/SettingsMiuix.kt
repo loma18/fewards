@@ -525,11 +525,13 @@ private fun OverviewHoldCustomDialog(
 /**
  * WorkBuddy 设备同步区块（嵌在 WorkBuddy 卡片里）。
  *
- * 两个动作刻意分开，因为它们的代价完全不同：
+ * 三个动作刻意分开，因为它们的代价完全不同：
  * - **刷新**会轮换 refresh_token，刷完电脑端那份立刻失效，必须紧接着推送；
- * - **推送**只搬运凭据，不改变任何 token，随时可以点。
+ * - **推送**只搬运凭据，不改变任何 token，随时可以点；
+ * - **从电脑取回**只读电脑端，把手机端已失效账号的 token 补回来。
  *
- * 所以"刷新"后面带一句提醒，"推送"不做任何前置要求。
+ * 早先是"刷新 → 推送 → 取回"一个按钮，好处是刷完不会忘推，坏处是想单独续凭据、
+ * 或者只想把手机救活时，都得连带做一次有代价的刷新。现在拆成三个，各自只做一件事。
  */
 @Composable
 private fun WbSyncSection(
@@ -550,7 +552,7 @@ private fun WbSyncSection(
                 } else {
                     // 把"有几个账号、选中几个"直接写出来，避免列表存在但全未勾选时
                     // 用户以为"没有可选账号"
-                    "选择要刷新的账号（${uiState.wbSyncSelected.size}/${uiState.wbAccounts.size}）"
+                    "选择要操作的账号（${uiState.wbSyncSelected.size}/${uiState.wbAccounts.size}）"
                 },
                 fontSize = 13.sp,
                 color = colorScheme.onSurfaceVariantSummary,
@@ -627,10 +629,40 @@ private fun WbSyncSection(
             onCheckedChange = actions.onSetWbSyncForcePush,
         )
 
-        TextButton(
-            text = if (uiState.wbSyncBusy) "同步中…" else "同步选中账号",
-            onClick = actions.onSyncWbAccounts,
+        Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TextButton(
+                text = if (uiState.wbSyncBusy && uiState.wbSyncMode == WbSyncMode.Refresh) {
+                    "刷新中…"
+                } else {
+                    "刷新选中账号"
+                },
+                onClick = actions.onRefreshWbAccounts,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+            TextButton(
+                text = if (uiState.wbSyncBusy && uiState.wbSyncMode == WbSyncMode.Push) {
+                    "同步中…"
+                } else {
+                    "同步选中账号"
+                },
+                onClick = actions.onSyncWbAccounts,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+        }
+
+        TextButton(
+            text = if (uiState.wbSyncBusy && uiState.wbSyncMode == WbSyncMode.Pull) {
+                "读取中…"
+            } else {
+                "从电脑同步凭据"
+            },
+            onClick = actions.onPullWbCredentials,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
             colors = ButtonDefaults.textButtonColorsPrimary(),
         )
 
@@ -654,8 +686,12 @@ private fun WbSyncSection(
         }
 
         Text(
-            text = "一次点击完成三件事：刷新选中账号的凭据 → 推送到电脑 → 取回电脑端最新凭据。" +
-                "刷新会换掉 refresh_token，所以合并成一个动作，避免刷完忘推导致电脑端账号失效。",
+            text = "三个动作代价不同，所以分开：\n" +
+                "· 刷新选中账号：只续本机凭据，不碰电脑。会换掉 refresh_token，电脑端那份随即失效，" +
+                "刷完记得点「同步选中账号」。\n" +
+                "· 同步选中账号：只把本机凭据推到电脑，再取回电脑端最新凭据，不刷新。\n" +
+                "· 从电脑同步凭据：手机上已失效的账号，去电脑端把仍有效的 token 读回来；" +
+                "有效的账号不动，只写 token 数据。",
             fontSize = 11.sp,
             color = colorScheme.onSurfaceVariantSummary,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),

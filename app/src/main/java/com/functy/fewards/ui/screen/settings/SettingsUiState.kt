@@ -4,6 +4,20 @@ import androidx.compose.runtime.Immutable
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamiccolor.ColorSpec
 
+/** 设备同步区正在进行的动作。三个按钮共用 [SettingsUiState.wbSyncBusy]，用它区分是谁在跑。 */
+enum class WbSyncMode {
+    None,
+
+    /** 只刷新本机凭据（会轮换 refresh_token） */
+    Refresh,
+
+    /** 推送到电脑并取回（不刷新） */
+    Push,
+
+    /** 只从电脑读取失效账号的凭据（不写电脑端） */
+    Pull,
+}
+
 @Immutable
 data class SettingsUiState(
     val themeMode: Int = 0,
@@ -37,6 +51,8 @@ data class SettingsUiState(
     val wbSyncForcePush: Boolean = false,
     val wbSyncLastAt: Long = 0L,
     val wbSyncBusy: Boolean = false,
+    /** 正在跑的是哪个动作：三个按钮共用一次"忙"状态，界面据此决定哪个按钮显示进度文案 */
+    val wbSyncMode: WbSyncMode = WbSyncMode.None,
     /** 一句话状态：正在做什么 / 失败原因 / 结果汇总 */
     val wbSyncStatus: String = "",
     /** 账号 id → 该账号最近一次刷新或同步的结果 */
@@ -73,8 +89,12 @@ data class SettingsScreenActions(
     val onSetWbSyncForcePush: (Boolean) -> Unit,
     val onToggleWbSyncAccount: (String, Boolean) -> Unit,
     val onSelectAllWbSync: (Boolean) -> Unit,
-    /** 一键同步选中账号：刷新 → 推送 → 取回（刷新会轮换 refresh_token） */
+    /** 一键同步选中账号：推送 → 取回（不刷新；刷新是独立按钮） */
     val onSyncWbAccounts: () -> Unit,
+    /** 刷新选中账号：只刷新本机凭据，不推送（会轮换 refresh_token） */
+    val onRefreshWbAccounts: () -> Unit,
+    /** 从电脑同步凭据：只对手机上已失效的账号，读回电脑端仍有效的 token */
+    val onPullWbCredentials: () -> Unit,
     // 通知与完成总览
     val onSetTaskNotification: (Boolean) -> Unit,
     val onSetOverviewAutoDismiss: (Boolean) -> Unit,

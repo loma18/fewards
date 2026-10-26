@@ -156,6 +156,41 @@ class LanSyncClientTest {
         assertEquals("账号太多，请求体超出上限", err?.message)
     }
 
+    // ==================== 只读取凭据 ====================
+
+    @Test
+    fun fetchPostsUidsAndParsesAccounts() = runBlocking {
+        respond(
+            "/api/lansync/fetch",
+            200,
+            """{"ok":true,"count":1,"accounts":[{"uid":"u1","label":"号","token":"AT_PC",
+               "refreshToken":"RT_PC","expiresAt":1761003600,"refreshExpiresAt":1763595600,
+               "refreshedAt":1761000000000,"isCurrent":true,"version":4,"encrypted":false}]}""",
+        )
+
+        val accounts = client().fetch(endpoint(), "12345678", listOf("u1", "u2"))
+
+        assertEquals("POST", captured[0].method)
+        assertEquals("/api/lansync/fetch", captured[0].path)
+        assertEquals("Bearer 12345678", captured[0].auth)
+        val sent = JSONObject(captured[0].body)
+        assertEquals(2, sent.getJSONArray("uids").length())
+        assertEquals("u2", sent.getJSONArray("uids").getString(1))
+
+        assertEquals(1, accounts.size)
+        assertEquals("AT_PC", accounts[0].token)
+        assertEquals(1_761_003_600L, accounts[0].expiresAt)
+    }
+
+    @Test
+    fun fetchKeepsStatusCodeSoCallerCanDetectOldConsole() = runBlocking {
+        // 旧版控制台没有 /fetch：调用方要能凭 404 退化成"只读推送"，不能只拿到一句文案
+        respond("/api/lansync/fetch", 404, "<html>Cannot POST /api/lansync/fetch</html>")
+        val err = runCatching { client().fetch(endpoint(), "12345678", listOf("u1")) }.exceptionOrNull()
+        assertTrue(err is LanSyncClient.LanSyncException)
+        assertEquals(404, (err as LanSyncClient.LanSyncException).code)
+    }
+
     // ==================== 拉取 / 确认 ====================
 
     @Test

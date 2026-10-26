@@ -211,6 +211,71 @@ class LanSyncProtocolTest {
         assertEquals("u3", items[1].uid)
     }
 
+    // ==================== 只读取凭据 ====================
+
+    @Test
+    fun fetchBodyCarriesUids() {
+        val body = LanSyncProtocol.buildFetchBody(listOf("u1", "u2"))
+        assertEquals(1, body.getInt("version"))
+        val uids = body.getJSONArray("uids")
+        assertEquals(2, uids.length())
+        assertEquals("u1", uids.getString(0))
+    }
+
+    @Test
+    fun parsesFetchAccounts() {
+        // 与 push 回传同一个结构，额外带 encrypted / refreshedAt：
+        // 手机端要靠 encrypted 区分"电脑端没有明文"和"电脑端没有这个账号"
+        val json = JSONObject(
+            """
+            {
+              "ok": true,
+              "count": 2,
+              "accounts": [
+                {
+                  "uid": "u1",
+                  "label": "电脑上的名字",
+                  "token": "AT_PC",
+                  "refreshToken": "RT_PC",
+                  "expiresAt": 1761003600,
+                  "refreshExpiresAt": 1763595600,
+                  "refreshedAt": 1761000000000,
+                  "isCurrent": true,
+                  "version": 5,
+                  "encrypted": false
+                },
+                {
+                  "uid": "u2",
+                  "label": "加密号",
+                  "token": "",
+                  "refreshToken": "",
+                  "expiresAt": 0,
+                  "refreshExpiresAt": 0,
+                  "isCurrent": false,
+                  "version": 0,
+                  "encrypted": true
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+        val list = LanSyncProtocol.parseFetchResponse(json)
+        assertEquals(2, list.size)
+        assertEquals("AT_PC", list[0].token)
+        assertEquals(1_761_003_600L, list[0].expiresAt)
+        assertTrue(list[0].isCurrent)
+        assertEquals(1_761_000_000_000L, list[0].refreshedAt)
+        assertFalse(list[0].encrypted)
+        // 加密信封：token 是空串，必须靠 encrypted 认出来
+        assertTrue(list[1].encrypted)
+        assertTrue(list[1].token.isEmpty())
+    }
+
+    @Test
+    fun toleratesMissingFetchAccounts() {
+        assertTrue(LanSyncProtocol.parseFetchResponse(JSONObject("""{"ok":true}""")).isEmpty())
+    }
+
     // ==================== 错误文案 ====================
 
     @Test
@@ -223,6 +288,8 @@ class LanSyncProtocolTest {
         assertEquals("配对码不正确", LanSyncProtocol.errorMessage("not json", 401))
         assertEquals("请求过于频繁，请稍后再试", LanSyncProtocol.errorMessage("", 429))
         assertEquals("账号太多，请求体超出上限", LanSyncProtocol.errorMessage("", 413))
+        // 旧版控制台没有 /fetch：必须提示"升级电脑端"，而不是让用户以为配对码填错了
+        assertTrue(LanSyncProtocol.errorMessage("", 404).contains("过旧"))
         assertTrue(LanSyncProtocol.errorMessage("", 500).contains("500"))
     }
 }

@@ -33,7 +33,7 @@ class LanSyncClient(baseClient: OkHttpClient) {
         .build()
 
     /** 电脑端明确返回的错误（带可直接展示的中文文案） */
-    class LanSyncException(message: String) : Exception(message)
+    class LanSyncException(message: String, val code: Int = 0) : Exception(message)
 
     companion object {
         private val jsonMedia = "application/json; charset=utf-8".toMediaType()
@@ -70,11 +70,41 @@ class LanSyncClient(baseClient: OkHttpClient) {
             .header("Accept", "application/json")
             .build()
         val (code, text) = execute(req)
-        if (code !in 200..299) throw LanSyncException(LanSyncProtocol.errorMessage(text, code))
+        if (code !in 200..299) throw LanSyncException(LanSyncProtocol.errorMessage(text, code), code)
         val json = runCatching { JSONObject(text) }.getOrElse {
             throw LanSyncException("电脑端返回的内容无法解析，请确认两端版本一致")
         }
         LanSyncProtocol.parsePushResponse(json)
+    }
+
+    /**
+     * 只读取电脑端现有凭据（**不写电脑端账号库**）。
+     *
+     * 用于「从电脑同步凭据」：手机端某个账号的 access token 过期了、电脑端那份还活着，
+     * 就把电脑端的值读回来补上。老的 `/push` 也能拿到回传，但它会先做一次合并裁决，
+     * 有把手机端的死凭据写进电脑端的可能；这里只读，语义明确。
+     *
+     * @param uids 只取这些账号（电脑端的 uid 或 id）；空列表表示全部
+     * @throws LanSyncException 电脑端明确拒绝（配对码错 / 版本过旧 404）
+     */
+    suspend fun fetch(
+        endpoint: LanSyncProtocol.Endpoint,
+        pairCode: String,
+        uids: List<String>,
+    ): List<LanSyncProtocol.Remote> = withContext(Dispatchers.IO) {
+        val body = LanSyncProtocol.buildFetchBody(uids)
+        val req = Request.Builder()
+            .url("${endpoint.baseUrl}/api/lansync/fetch")
+            .post(body.toString().toRequestBody(jsonMedia))
+            .header("Authorization", "Bearer $pairCode")
+            .header("Accept", "application/json")
+            .build()
+        val (code, text) = execute(req)
+        if (code !in 200..299) throw LanSyncException(LanSyncProtocol.errorMessage(text, code), code)
+        val json = runCatching { JSONObject(text) }.getOrElse {
+            throw LanSyncException("电脑端返回的内容无法解析，请确认两端版本一致")
+        }
+        LanSyncProtocol.parseFetchResponse(json)
     }
 
     /** 拉取"电脑刷新过、还没通知手机"的凭据 */
@@ -89,7 +119,7 @@ class LanSyncClient(baseClient: OkHttpClient) {
             .header("Accept", "application/json")
             .build()
         val (code, text) = execute(req)
-        if (code !in 200..299) throw LanSyncException(LanSyncProtocol.errorMessage(text, code))
+        if (code !in 200..299) throw LanSyncException(LanSyncProtocol.errorMessage(text, code), code)
         val json = runCatching { JSONObject(text) }.getOrElse {
             throw LanSyncException("电脑端返回的内容无法解析，请确认两端版本一致")
         }
@@ -111,7 +141,7 @@ class LanSyncClient(baseClient: OkHttpClient) {
             .header("Accept", "application/json")
             .build()
         val (code, text) = execute(req)
-        if (code !in 200..299) throw LanSyncException(LanSyncProtocol.errorMessage(text, code))
+        if (code !in 200..299) throw LanSyncException(LanSyncProtocol.errorMessage(text, code), code)
     }
 
     private fun execute(req: Request): Pair<Int, String> =

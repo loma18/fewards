@@ -43,6 +43,8 @@ fun SettingPager(
         onToggleWbSyncAccount = viewModel::toggleWbSyncAccount,
         onSelectAllWbSync = viewModel::selectAllWbSync,
         onSyncWbAccounts = viewModel::syncSelectedAccounts,
+        onRefreshWbAccounts = viewModel::refreshSelectedAccounts,
+        onPullWbCredentials = viewModel::pullCredentialsFromComputer,
         onSetTaskNotification = viewModel::setTaskNotification,
         onSetOverviewAutoDismiss = viewModel::setOverviewAutoDismiss,
         onSetOverviewHoldSeconds = viewModel::setOverviewHoldSeconds,

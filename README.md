@@ -95,21 +95,24 @@ WorkBuddy's `refresh_token` is **rotating**: one successful refresh invalidates 
 
 1. On the desktop, open **Settings → 手机同步（局域网）**, turn it on, copy the **address** and **pair code**
 2. On the phone, open **Settings → WorkBuddy → 设备同步**, paste both values
-3. Tick the accounts you want (all ticked by default) → **同步选中账号**
+3. Tick the accounts you want (all ticked by default)
+4. Use **刷新选中账号** to renew this phone's credentials, **同步选中账号** to push them to the desktop, and **从电脑同步凭据** to rescue accounts that already expired on the phone
 
-### One button, three steps
+### Three separate actions
 
-**同步选中账号** does all of it in one tap:
+| Button | What it does | Cost |
+|---|---|---|
+| **刷新选中账号** | Calls the official refresh endpoint with each selected account's `refresh_token`. Local only — nothing is sent to the desktop. | **Rotates the token**: the desktop's copy dies immediately. Push right after. |
+| **同步选中账号** | Pushes the current credentials to the desktop, then pulls back whatever the desktop returns (it may have refreshed some accounts itself). Never refreshes. | Free — no token changes. |
+| **从电脑同步凭据** | For accounts whose token is **dead on the phone**, reads the still-valid token back from the desktop. Valid accounts are never touched; only token fields are written. | Free — the desktop is read-only for this call. |
 
-| Step | What happens |
-|---|---|
-| 1. Refresh | Calls the official refresh endpoint with each selected account's `refresh_token` |
-| 2. Push | Sends the fresh credentials to the desktop |
-| 3. Pull back | Writes whatever the desktop returns (it may have refreshed some accounts itself) |
+Why refresh is a separate button: a refresh **rotates** the token, so the desktop's copy dies the moment it succeeds. Merging refresh into the sync button meant every "just push what I have" click also cost a rotation. Split apart, each button does exactly one thing — just remember that after a refresh the desktop holds a dead copy until you push.
 
-Why merged: a refresh **rotates** the token, so the desktop's copy dies the moment the refresh succeeds. With two separate buttons, forgetting the second step silently kills the account on the desktop. Done together, there is no window in between.
+**从电脑同步凭据** has three hard rules: only accounts that are already dead on the phone are considered, the desktop's credential must still be valid, and only token data (access / refresh / expiry) is written — label, avatar and enterprise info stay untouched.
 
-If no address / pair code is configured, it degrades to "refresh locally only" and says so in the result line.
+The desktop side exposes this as a **read-only** `POST /api/lansync/fetch` (it never writes its account store). Against an older console without that endpoint, the phone degrades to a "read-only push" (`obtainedAt = 0` makes the desktop keep its own copy) and still works.
+
+If no address / pair code is configured, all three buttons report what is missing instead of silently doing nothing.
 
 ### Notes
 

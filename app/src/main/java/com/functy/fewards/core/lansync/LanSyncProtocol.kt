@@ -60,6 +60,10 @@ object LanSyncProtocol {
         /** 电脑端正在使用该账号：a 不应覆盖它，也不应刷新它 */
         val isCurrent: Boolean,
         val version: Long,
+        /** 电脑端是加密信封凭据（拿不到明文，手机端不能拿它覆盖本机） */
+        val encrypted: Boolean = false,
+        /** 毫秒：电脑端最近一次刷新该凭据的时刻，0 = 未知 */
+        val refreshedAt: Long = 0L,
     )
 
     /** 单条裁决结果 */
@@ -164,6 +168,32 @@ object LanSyncProtocol {
             .put("accounts", arr)
     }
 
+    /**
+     * 构造"只读取凭据"的请求体（`POST /api/lansync/fetch`）。
+     *
+     * 与 push 的区别是**电脑端不落库**：这里只是按 uid 把电脑端现有的明文凭据读回来，
+     * 用于"手机端凭据失效了、电脑端还活着"的补全场景。uid 为空时由电脑端返回全部账号。
+     */
+    fun buildFetchBody(uids: List<String>): JSONObject = JSONObject()
+        .put("version", VERSION)
+        .put("uids", JSONArray(uids))
+
+    /**
+     * 解析读取响应。
+     *
+     * 返回的账号是电脑端的**当前值**，手机端写回前必须自己再校验一次有效性——
+     * 电脑端也可能早就过期了，直接写进去只会把"已失效"变成"看起来有效"。
+     */
+    fun parseFetchResponse(json: JSONObject): List<Remote> {
+        val arr = json.optJSONArray("accounts") ?: JSONArray()
+        val list = ArrayList<Remote>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            list.add(parseRemote(o))
+        }
+        return list
+    }
+
     /** 解析推送响应；结构不认识时抛 [IllegalStateException]，由上层转成可读错误 */
     fun parsePushResponse(json: JSONObject): PushResponse {
         val arr = json.optJSONArray("results") ?: JSONArray()
@@ -193,6 +223,8 @@ object LanSyncProtocol {
         refreshExpiresAt = o.optLong("refreshExpiresAt"),
         isCurrent = o.optBoolean("isCurrent", false),
         version = o.optLong("version"),
+        encrypted = o.optBoolean("encrypted", false),
+        refreshedAt = o.optLong("refreshedAt"),
     )
 
     /** 解析待同步队列 */
@@ -223,6 +255,7 @@ object LanSyncProtocol {
         if (text.isNotEmpty()) return text
         return when (httpStatus) {
             401 -> "配对码不正确"
+            404 -> "电脑端不支持该操作（控制台版本过旧，请升级电脑端）"
             429 -> "请求过于频繁，请稍后再试"
             413 -> "账号太多，请求体超出上限"
             else -> "同步失败（HTTP $httpStatus）"

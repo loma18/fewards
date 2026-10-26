@@ -154,8 +154,14 @@ app/src/test/java/com/functy/fewards/
 - **到期统计**（`CreditStats`，账号页顶部与每行）：只算未过期且 `remaining > 0` 的包；
   3 日 / 5 日是独立口径（5 日包含 3 日，所以 3 日的数不会超过 5 日）；缺 uid 的账号跳过，
   不进"查询中"的计数。
-- **刷新与同步**：refresh_token 是轮换式的，刷新成功后旧值立刻作废。设置页「同步选中账号」
-  一次走完 **刷新 → 推送 → 取回**，中间不能断（断了电脑端那份就死了）。
+- **刷新与同步**：refresh_token 是轮换式的，刷新成功后旧值立刻作废。设置页拆成三个动作，别再合并：
+  「刷新选中账号」只刷本机（会轮换，刷完要用户自己推）、「同步选中账号」只做 **推送 → 取回**、
+  「从电脑同步凭据」只针对手机上已失效的账号、把电脑端仍有效的 token 读回来（只写 token 字段，
+  label / 头像不动）。"失效"的判定统一走 `CredentialHealth`（`expiresAt` 是秒，0 = 不知道，
+  不能当已过期）。
+  电脑端 `POST /api/lansync/fetch` 是**只读**端点，一行都不写账号库；旧版控制台没有它（404）时
+  手机端退化成一次 `obtainedAt = 0` 的只读推送——这个 0 是让电脑端走"新鲜度未知 → 保留本地"，
+  不要换成真实时间戳，否则可能用手机端的死凭据覆盖电脑端。
   电脑端刷新后会入队，a 主动拉取，不要改成 b 反向推给 a（手机 IP 会变、后台监听不可靠）。
 
 ## 账号与配置
@@ -218,7 +224,7 @@ app/src/test/java/com/functy/fewards/
 
 `./gradlew :app:testDebugUnitTest`，CI：`.github/workflows/test.yml`。
 
-改了下面这些必须有/更新 JVM 测试：WorkBuddy `interpretDailyCheckin`、扫码协议（`WorkBuddyLoginTest`：信封 code 优先、11217 视为等待、驼峰字段、缺 uid 未就绪、缺 code 不算成功）、JWT 的 uid/exp（`WorkBuddyLabelTest`）、成长中心补登日历（`WorkBuddyGrowthTest`）、积分解析与到期口径（`WorkBuddyCreditsTest`）、积分统计（`CreditStatsTest`）、同步协议与客户端（`LanSyncProtocolTest` / `LanSyncClientTest`）、`ConfigTransferParser`。
+改了下面这些必须有/更新 JVM 测试：WorkBuddy `interpretDailyCheckin`、扫码协议（`WorkBuddyLoginTest`：信封 code 优先、11217 视为等待、驼峰字段、缺 uid 未就绪、缺 code 不算成功）、JWT 的 uid/exp（`WorkBuddyLabelTest`）、成长中心补登日历（`WorkBuddyGrowthTest`）、积分解析与到期口径（`WorkBuddyCreditsTest`）、积分统计（`CreditStatsTest`）、同步协议与客户端（`LanSyncProtocolTest` / `LanSyncClientTest`）、凭据有效性判定（`CredentialHealthTest`）、`ConfigTransferParser`。
 
 `CreditStatsTest` 钉的是账页顶部汇总的口径，改动前先看注释：只算未过期额度、已用完的包不算"即将到期"、
 3 日与 5 日是独立口径（5 日包含 3 日）、缺 uid 的账号跳过。`HomeSummaryTest` 钉首页可见性与完成判定。
