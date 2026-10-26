@@ -3,6 +3,9 @@ package com.functy.fewards.data.repository
 import android.content.Context
 import androidx.core.content.edit
 import com.functy.fewards.fewardsApp
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -14,6 +17,21 @@ import org.json.JSONObject
  * 这两块功能已移除，残留键不再读取，也不会被清掉——用户若需要手工回收空间自行删除即可。
  */
 class AccountRepository {
+
+    companion object {
+        /**
+         * 账号库版本号：任何一次写入都自增。
+         *
+         * 三页是同一个 pager 里的常驻页面，切页不重建 ViewModel、也不触发 Activity resume。
+         * 设置页「从电脑同步凭据」往库里写新账号后，账号页如果不订阅一个信号，就只能等
+         * 用户手动刷新（2026-10-26 反馈：同步完在设置页能看到账号、账号页却是空的）。
+         *
+         * 放在 companion 里而不是实例字段：仓储是随手 `AccountRepository()` 出来的，
+         * 各处的实例必须共享同一份计数。
+         */
+        private val _revision = MutableStateFlow(0L)
+        val revision: StateFlow<Long> = _revision.asStateFlow()
+    }
 
     private val prefs by lazy {
         fewardsApp.getSharedPreferences("secure_store", Context.MODE_PRIVATE)
@@ -152,6 +170,8 @@ class AccountRepository {
             )
         }
         prefs.edit { putString("sec.wb.accounts", arr.toString()) }
+        // 通知订阅方（账号页）"库变了"，不必等切页或手动刷新
+        _revision.value += 1
     }
 
     fun workBuddyConfigured(): Boolean = workBuddyAccounts().isNotEmpty()

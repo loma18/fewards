@@ -18,6 +18,7 @@ import com.functy.fewards.ui.theme.ColorMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.IOException
@@ -35,6 +36,18 @@ class SettingsViewModel(
 
     init {
         refresh()
+        /**
+         * 账号库一变就重读。
+         *
+         * 反方向的同样问题：在账号页扫码 / 从电脑同步新增了账号，再切到设置页时，
+         * 同步勾选列表还停在旧快照上——新账号既看不到、也没法勾选推送。
+         * 订阅 `AccountRepository.revision` 让两个页面看到的永远是同一份库。
+         *
+         * drop(1) 跳过 StateFlow 立刻回放的当前值（上面的 refresh() 已经读过一次）。
+         */
+        viewModelScope.launch {
+            AccountRepository.revision.drop(1).collect { refresh() }
+        }
     }
 
     fun refresh() {
@@ -578,6 +591,7 @@ class SettingsViewModel(
                         accessToken = it.token,
                         refreshToken = it.refreshToken,
                         expiresAt = it.expiresAt,
+                        refreshExpiresAt = it.refreshExpiresAt,
                         // 0 = "新鲜度未知"：电脑端据此一律保留自己的凭据
                         obtainedAt = 0L,
                     )
@@ -740,6 +754,7 @@ class SettingsViewModel(
                     accessToken = it.token,
                     refreshToken = it.refreshToken,
                     expiresAt = it.expiresAt,
+                    refreshExpiresAt = it.refreshExpiresAt,
                     obtainedAt = it.obtainedAt,
                 )
             }

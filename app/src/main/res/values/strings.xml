@@ -32,6 +32,7 @@
     <string name="workbuddy_qr_scanned">已扫码，请在手机上确认</string>
 
     <string name="account_add">添加账号</string>
+    <string name="account_refresh">刷新账号列表</string>
     <string name="account_add_workbuddy">添加 WorkBuddy 账号</string>
     <string name="account_empty">还没有账号，点右上角 + 添加</string>
 

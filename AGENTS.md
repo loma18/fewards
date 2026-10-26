@@ -171,6 +171,12 @@ app/src/test/java/com/functy/fewards/
 ## 账号与配置
 
 - 凭据只存在本机 SharedPreferences（`AccountRepository` / `SettingsRepositoryImpl`）。日志禁止打印 token / cookie / stoken。
+- **账号库变更必须能被页面感知**：`AccountRepository` 的 companion 里有 `revision`（StateFlow），
+  `saveWorkBuddy` 每次写盘都自增；账号页与设置页两个 ViewModel 都 `drop(1)` 后订阅它。
+  原因是三页常驻同一个 pager，切页既不重建 ViewModel 也不触发 resume——只靠 init 时读一次，
+  就会出现"设置页同步过来的账号在账号页看不见"。**新加的写库路径必须走到 `saveWorkBuddy`**。
+- 账号页右上角有两个按钮：刷新（`account_refresh`，只重读本地库 + 命中缓存才查积分）与「+」。
+  切回账号页时也会 `refresh()` 一次（`AccountPager` 的 `LaunchedEffect(isCurrentPage)`）。
 - 配置导入导出（`ConfigTransferParser` / `ConfigTransferRepository` / 设置页「导入 / 导出配置」卡片）**已整体移除**：
   迁移账号现在走「从电脑同步凭据」。不要再加回来，也不要恢复 `_format=fewards-config` 备份格式。
 - 输入框用 miuix `basic.TextField`（`MultilineInputField` 包装）。不要用已删除的 `EditText.kt`。

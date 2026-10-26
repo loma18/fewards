@@ -17,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -47,6 +48,16 @@ class AccountViewModel : ViewModel() {
 
     init {
         refresh()
+        /**
+         * 账号库一变就重读。
+         *
+         * 设置页的「从电脑同步凭据 / 同步选中账号」、WorkBuddy 巡检刷新都会改库，
+         * 而这些动作都不在本页触发；不订阅就只能等用户切页（见 AccountPager 的 refresh）。
+         * StateFlow 订阅会立刻收到当前值，`drop(1)` 跳过它，避免和上面的 refresh() 重复。
+         */
+        viewModelScope.launch {
+            AccountRepository.revision.drop(1).collect { refresh() }
+        }
     }
 
     fun refresh() {

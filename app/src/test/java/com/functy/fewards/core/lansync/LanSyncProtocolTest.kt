@@ -99,6 +99,7 @@ class LanSyncProtocolTest {
                     refreshToken = "RT",
                     expiresAt = 1_761_000_000,      // 秒
                     obtainedAt = 1_761_000_000_000, // 毫秒
+                    refreshExpiresAt = 1_761_500_000, // 秒
                 )
             ),
             deviceName = "Pixel",
@@ -114,6 +115,8 @@ class LanSyncProtocolTest {
         // 秒：不能被乘成毫秒，否则电脑端会判定"10 万年后才过期"
         assertEquals(1_761_000_000L, acc.getLong("expiresAt"))
         assertEquals(1_761_000_000_000L, acc.getLong("obtainedAt"))
+        // refresh 的有效期必须跟着推送走：漏了它，电脑端只能按"未知"落库
+        assertEquals(1_761_500_000L, acc.getLong("refreshExpiresAt"))
         assertEquals("cn", acc.getString("variant"))
     }
 

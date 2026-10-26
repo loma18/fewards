@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -96,6 +97,8 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 fun AccountPagerMiuix(
     accountViewModel: AccountViewModel,
     bottomInnerPadding: Dp,
+    /** 手动刷新：重读账号库（设置页同步过来的账号、外部改动的凭据都靠它可见） */
+    onRefresh: () -> Unit = {},
 ) {
     val scrollBehavior = MiuixScrollBehavior()
     val state by accountViewModel.uiState.collectAsStateWithLifecycle()
@@ -219,6 +222,25 @@ fun AccountPagerMiuix(
                 title = stringResource(R.string.account_title),
                 scrollBehavior = scrollBehavior,
                 actions = {
+                    Box(
+                        modifier = Modifier.offset {
+                            val collapsed = scrollBehavior.state.collapsedFraction
+                            IntOffset(0, (plusOffsetPx * (1f - collapsed)).roundToInt())
+                        },
+                    ) {
+                        IconButton(
+                            onClick = {
+                                dismissInput()
+                                onRefresh()
+                            },
+                        ) {
+                            Icon(
+                                Icons.Rounded.Refresh,
+                                contentDescription = stringResource(R.string.account_refresh),
+                                tint = colorScheme.onBackground,
+                            )
+                        }
+                    }
                     Box(
                         // 和大标题对齐：actions 默认垂直居中在「收起高度」（52dp）里，
                         // 大标题却排在 52dp 之下，所以整体下移「半个收起高度 + 半个行高」。

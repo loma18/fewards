@@ -41,10 +41,18 @@ object LanSyncProtocol {
         val enterpriseId: String,
         val accessToken: String,
         val refreshToken: String,
-        /** 秒 */
+        /** 秒：access_token 到期 */
         val expiresAt: Long,
         /** 毫秒；0 = 未知（老数据），电脑端会走保守分支 */
         val obtainedAt: Long,
+        /**
+         * 秒：refresh_token 到期。
+         *
+         * 早先没带这个字段，电脑端只能按 0（未知）落库——手机推过去的账号在电脑上
+         * 永远显示「refresh 未知」，明明手机这边有值也被丢掉。0 表示本机也没有（扫码接口
+         * 不返回 refresh 有效期时会这样），电脑端不会据此判死。
+         */
+        val refreshExpiresAt: Long = 0L,
     )
 
     /** 电脑端回传的账号（b 的形态，字段名已换成 a 的习惯） */
@@ -163,6 +171,7 @@ object LanSyncProtocol {
                     .put("accessToken", a.accessToken)
                     .put("refreshToken", a.refreshToken)
                     .put("expiresAt", a.expiresAt)
+                    .put("refreshExpiresAt", a.refreshExpiresAt)
                     .put("obtainedAt", a.obtainedAt)
                     .put("version", 0)
                     .put("variant", "cn")
