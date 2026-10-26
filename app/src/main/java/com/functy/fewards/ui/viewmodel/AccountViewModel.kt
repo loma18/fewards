@@ -9,6 +9,7 @@ import com.functy.fewards.core.bing.BingIdentity
 import com.functy.fewards.core.bing.BingOAuth
 import com.functy.fewards.core.mihoyo.MihoyoApi
 import com.functy.fewards.core.mihoyo.MihoyoProfileHydrator
+import com.functy.fewards.core.workbuddy.WorkBuddyCredits
 import com.functy.fewards.core.workbuddy.WorkBuddyLabel
 import com.functy.fewards.core.workbuddy.WorkBuddyLogin
 import com.functy.fewards.data.repository.AccountRepository
@@ -16,6 +17,8 @@ import com.functy.fewards.fewardsApp
 import com.functy.fewards.ui.screen.account.AccountActions
 import com.functy.fewards.ui.screen.account.AccountUiState
 import com.functy.fewards.ui.screen.account.QrState
+import com.functy.fewards.ui.screen.account.WbCreditDetailState
+import com.functy.fewards.ui.screen.account.WbCreditState
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +37,7 @@ class AccountViewModel : ViewModel() {
     private val api = MihoyoApi(MihoyoApi.defaultClient())
     private val wbLogin = WorkBuddyLogin(fewardsApp.okhttpClient)
     private val bingOAuth = BingOAuth(fewardsApp.okhttpClient)
+    private val credits = WorkBuddyCredits(fewardsApp.okhttpClient)
 
     private val _uiState = MutableStateFlow(AccountUiState())
     val uiState: StateFlow<AccountUiState> = _uiState.asStateFlow()
@@ -41,6 +45,14 @@ class AccountViewModel : ViewModel() {
     private var qrJob: Job? = null
     private var wbQrJob: Job? = null
     private var bingJob: Job? = null
+    private var creditJob: Job? = null
+    private var creditDetailJob: Job? = null
+
+    /** 余额缓存：官方接口较慢，2 分钟内重复进页面直接用上一次结果（与 b 端同口径） */
+    private val creditCache = HashMap<String, Pair<Long, WorkBuddyCredits.Balance>>()
+
+    /** 待查积分的账号 id（串行消费，避免并发打官方接口） */
+    private val creditQueue = LinkedHashSet<String>()
 
     init {
         refresh()
@@ -50,6 +62,7 @@ class AccountViewModel : ViewModel() {
         repairBingLabels()
         publishAccounts()
         hydrateMissingProfiles()
+        syncWbCredits()
     }
 
     /**
@@ -281,7 +294,125 @@ class AccountViewModel : ViewModel() {
 
     fun removeWb(id: String) {
         accounts.removeWorkBuddyAccount(id)
+        creditCache.remove(id)
         refresh()
+    }
+
+    // ==================== WorkBuddy 积分 ====================
+
+    /**
+     * 查一遍所有 WorkBuddy 账号的积分余额。
+     *
+     * 进账号页自动触发；串行 + 小间隔，避免同时打多个官方接口。
+     * 2 分钟内已查过的账号直接用缓存（除非 [force]）——官方汇总接口本身较慢，
+     * 每次进页面都重查会让列表一直停在"查询中"。
+     *
+     * 用一个待查队列而不是"正在跑就直接返回"：`refresh()` 会因扫码加号、删除账号被
+     * 频繁调用，直接返回会让刚加的账号永远停在"积分待查询"。
+     */
+    private fun syncWbCredits(force: Boolean = false) {
+        val list = accounts.workBuddyAccounts().filter { it.uid.isNotEmpty() }
+        if (list.isEmpty()) return
+
+        val now = System.currentTimeMillis()
+        // 先把手里的缓存铺进状态，避免每次进页面都从空白闪一下
+        val seeded = list.mapNotNull { acc ->
+            creditCache[acc.id]?.let { acc.id to WbCreditState(balance = it.second) }
+        }.toMap()
+        if (seeded.isNotEmpty()) {
+            _uiState.update { it.copy(wbCredits = it.wbCredits + seeded) }
+        }
+
+        val targets = list.filter { acc ->
+            val cached = creditCache[acc.id]
+            force || cached == null || now - cached.first > CREDIT_CACHE_TTL_MS
+        }
+        if (targets.isEmpty()) return
+
+        if (force) {
+            creditQueue.clear()
+            creditJob?.cancel()
+        }
+        creditQueue += targets.map { it.id }
+        if (creditJob?.isActive == true) return
+
+        creditJob = viewModelScope.launch {
+            while (creditQueue.isNotEmpty()) {
+                val id = creditQueue.first()
+                creditQueue.remove(id)
+                // 每轮重新读盘：上一个账号的刷新可能顺带改了列表
+                val acc = accounts.workBuddyAccounts().firstOrNull { it.id == id } ?: continue
+                _uiState.update { s ->
+                    val prev = s.wbCredits[id] ?: WbCreditState()
+                    s.copy(wbCredits = s.wbCredits + (id to prev.copy(loading = true, error = "")))
+                }
+                try {
+                    val balance = credits.balance(acc)
+                    creditCache[id] = System.currentTimeMillis() to balance
+                    _uiState.update { s ->
+                        s.copy(wbCredits = s.wbCredits + (id to WbCreditState(balance = balance)))
+                    }
+                } catch (c: kotlinx.coroutines.CancellationException) {
+                    throw c
+                } catch (e: Exception) {
+                    // 失败不写缓存：下次进页面还要重试
+                    _uiState.update { s ->
+                        s.copy(wbCredits = s.wbCredits + (id to WbCreditState(error = e.message ?: "积分查询失败")))
+                    }
+                }
+                kotlinx.coroutines.delay(120)
+            }
+        }
+    }
+
+    /** 打开某账号的积分明细弹窗，并拉取逐笔记录。 */
+    fun viewWbCredits(id: String) {
+        val account = accounts.workBuddyAccounts().firstOrNull { it.id == id } ?: return
+        _uiState.update {
+            it.copy(wbCreditDetailId = id, wbCreditDetail = WbCreditDetailState(loading = true))
+        }
+        creditDetailJob?.cancel()
+        creditDetailJob = viewModelScope.launch {
+            try {
+                val records = credits.records(account)
+                _uiState.update {
+                    it.copy(wbCreditDetail = WbCreditDetailState(success = true, records = records))
+                }
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        wbCreditDetail = WbCreditDetailState(
+                            success = true,
+                            error = e.message ?: "明细查询失败",
+                        )
+                    )
+                }
+            }
+        }
+        // 余额还没拿到（或已过期）时顺手补一次，弹窗标题要显示汇总
+        if (_uiState.value.wbCredits[id]?.balance == null) refreshWbCredits(id, withDetail = false)
+    }
+
+    /** 关闭积分明细弹窗。刻意不清空 [AccountUiState.wbCreditDetail]：关闭动画期间还要渲染内容。 */
+    fun closeWbCredits() {
+        creditDetailJob?.cancel()
+        creditDetailJob = null
+        _uiState.update { it.copy(wbCreditDetailId = "") }
+    }
+
+    /**
+     * 重新查询某账号的积分（绕过缓存）。
+     *
+     * 走 [syncWbCredits] 的队列而不是单开一个协程：`creditJob` 只能有一个引用，
+     * 覆盖它会让队列里的其他账号永远停在"查询中"。
+     */
+    fun refreshWbCredits(id: String, withDetail: Boolean = true) {
+        if (accounts.workBuddyAccounts().none { it.id == id }) return
+        creditCache.remove(id)
+        syncWbCredits()
+        if (withDetail && _uiState.value.wbCreditDetailId == id) viewWbCredits(id)
     }
 
     // ==================== Bing ====================
@@ -438,6 +569,9 @@ class AccountViewModel : ViewModel() {
     private companion object {
         /** refresh_token 是长串不透明凭据；明显过短 / 带空白的一律当格式错误。 */
         const val MIN_BING_REFRESH_TOKEN_LENGTH = 20
+
+        /** 积分余额缓存时长，与 b 端 `BALANCE_CACHE_TTL_MS` 一致 */
+        const val CREDIT_CACHE_TTL_MS = 2 * 60 * 1000L
     }
 
     val accountActions = AccountActions(
@@ -451,6 +585,9 @@ class AccountViewModel : ViewModel() {
         onSetWbLoginMode = ::setWbLoginMode,
         onStartWbQr = ::startWbQrLogin,
         onCancelWbQr = ::cancelWbQr,
+        onViewWbCredits = ::viewWbCredits,
+        onCloseWbCredits = ::closeWbCredits,
+        onRefreshWbCredits = { refreshWbCredits(it) },
         onSetBingLoginMode = ::setBingLoginMode,
         onStartBingAuth = ::startBingAuth,
         onCancelBingAuth = ::cancelBingAuth,

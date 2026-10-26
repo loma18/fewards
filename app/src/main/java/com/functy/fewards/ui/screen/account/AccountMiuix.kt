@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,6 +58,7 @@ import com.functy.fewards.R
 import com.functy.fewards.ui.component.IconSquircleCornerFraction
 import com.functy.fewards.ui.component.miuix.AddAccountDialog
 import com.functy.fewards.ui.component.miuix.BingAuthWebView
+import com.functy.fewards.ui.component.miuix.WbCreditsDialog
 import com.functy.fewards.ui.viewmodel.AccountViewModel
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
@@ -314,6 +316,18 @@ fun AccountPagerMiuix(
         )
     }
 
+    // 积分明细弹窗：常驻挂载，靠 show 控制开合（关闭动画期间还要渲染上一份数据）
+    WbCreditsDialog(
+        show = state.wbCreditDetailId.isNotEmpty(),
+        accountLabel = state.wbAccounts.firstOrNull { it.id == state.wbCreditDetailId }?.label.orEmpty(),
+        credit = state.wbCredits[state.wbCreditDetailId] ?: WbCreditState(),
+        detail = state.wbCreditDetail,
+        onDismissRequest = { actions.onCloseWbCredits() },
+        onRefresh = {
+            if (state.wbCreditDetailId.isNotEmpty()) actions.onRefreshWbCredits(state.wbCreditDetailId)
+        },
+    )
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -460,11 +474,7 @@ fun AccountPagerMiuix(
                             state.wbAccounts.forEach { account ->
                                 BasicComponent(
                                     title = account.label,
-                                    summary = if (account.uid.isNotEmpty()) {
-                                        "uid=${account.uid}"
-                                    } else {
-                                        "token=${account.token.take(6)}****"
-                                    },
+                                    summary = wbSummary(account, state.wbCredits[account.id]),
                                     startAction = {
                                         AccountFace(
                                             url = account.avatarUrl,
@@ -473,6 +483,19 @@ fun AccountPagerMiuix(
                                         )
                                     },
                                     endActions = {
+                                        // 查看积分：点开逐笔明细（余额显示在 summary 上）
+                                        IconButton(
+                                            onClick = {
+                                                dismissInput()
+                                                actions.onViewWbCredits(account.id)
+                                            },
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.Star,
+                                                contentDescription = "查看积分",
+                                                tint = colorScheme.primary,
+                                            )
+                                        }
                                         IconButton(
                                             onClick = {
                                                 dismissInput()
@@ -591,6 +614,33 @@ private fun bingSummary(account: com.functy.fewards.data.repository.AccountRepos
     if (account.lastBalance < 0) return stringResource(R.string.bing_balance_unknown)
     val balance = stringResource(R.string.bing_balance, account.lastBalance)
     return if (account.country.isNotEmpty()) balance + " · " + account.country else balance
+}
+
+/**
+ * WorkBuddy 账号的副标题：uid / token 指纹 + 积分余额。
+ *
+ * 积分查询失败时明写「积分查询失败」，不显示 0——0 会被当成"真的没积分了"。
+ * 缺 uid 的账号（手动粘 token 导入）查不了积分，单独提示而不是一直转圈。
+ */
+@Composable
+private fun wbSummary(
+    account: com.functy.fewards.data.repository.AccountRepository.WorkBuddyAccount,
+    credit: WbCreditState?,
+): String {
+    val base = if (account.uid.isNotEmpty()) {
+        "uid=${account.uid}"
+    } else {
+        "token=${account.token.take(6)}****"
+    }
+    val detail = when {
+        credit?.balance != null ->
+            "剩余 " + com.functy.fewards.core.workbuddy.WorkBuddyCredits.format(credit.balance.remaining) + " 积分"
+        credit?.loading == true -> "积分查询中…"
+        credit?.error?.isNotEmpty() == true -> "积分查询失败"
+        account.uid.isEmpty() -> "积分不可查（缺 uid）"
+        else -> "积分待查询"
+    }
+    return "$base · $detail"
 }
 
 /** 灰色小标题：区分米游社 / WorkBuddy / Bing 账号分组。 */
