@@ -102,7 +102,7 @@ import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 
 /**
- * 设置页（Miuix）：大标题「设置」，从上到下为界面组、米游社板块、WorkBuddy 板块、通知与完成总览、关于。
+ * 设置页（Miuix）：大标题「设置」，从上到下为界面组、WorkBuddy 板块、通知与完成总览、导入导出、关于。
  */
 @Composable
 fun SettingPagerMiuix(
@@ -176,150 +176,6 @@ fun SettingPagerMiuix(
                                 actions.onOpenTheme()
                             }
                         )
-                    }
-
-                    // ==================== 米游社 ====================
-                    Card(
-                        modifier = Modifier
-                            .padding(top = 12.dp)
-                            .fillMaxWidth(),
-                    ) {
-                        SwitchPreference(
-                            title = stringResource(id = R.string.settings_mhy_master),
-                            summary = stringResource(id = R.string.settings_mhy_master_summary),
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.Shield,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = stringResource(id = R.string.settings_mhy_master),
-                                    tint = colorScheme.onBackground
-                                )
-                            },
-                            checked = uiState.mhyMasterEnabled,
-                            onCheckedChange = actions.onSetMhyMaster
-                        )
-                        AnimatedVisibility(
-                            visible = uiState.mhyMasterEnabled,
-                            enter = fadeIn() + expandVertically(),
-                            exit = fadeOut() + shrinkVertically(),
-                        ) {
-                            Column {
-                        SwitchPreference(
-                            title = stringResource(id = R.string.settings_mhy_game_sign),
-                            summary = stringResource(id = R.string.settings_mhy_game_sign_summary),
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.Gamepad,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = stringResource(id = R.string.settings_mhy_game_sign),
-                                    tint = colorScheme.onBackground
-                                )
-                            },
-                            checked = uiState.mhyGameSign,
-                            onCheckedChange = actions.onSetMhyGameSign
-                        )
-                        SwitchPreference(
-                            title = stringResource(id = R.string.settings_mhy_bbs_sign),
-                            summary = stringResource(id = R.string.settings_mhy_bbs_sign_summary),
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.WorkspacePremium,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = stringResource(id = R.string.settings_mhy_bbs_sign),
-                                    tint = colorScheme.onBackground
-                                )
-                            },
-                            checked = uiState.mhyBbsSign,
-                            onCheckedChange = actions.onSetMhyBbsSign
-                        )
-                        SwitchPreference(
-                            title = stringResource(id = R.string.settings_mhy_read),
-                            summary = stringResource(id = R.string.settings_mhy_read_summary),
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.Visibility,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = stringResource(id = R.string.settings_mhy_read),
-                                    tint = colorScheme.onBackground
-                                )
-                            },
-                            checked = uiState.mhyRead,
-                            onCheckedChange = actions.onSetMhyRead
-                        )
-                        SwitchPreference(
-                            title = stringResource(id = R.string.settings_mhy_like),
-                            summary = stringResource(id = R.string.settings_mhy_like_summary),
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.ThumbUp,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = stringResource(id = R.string.settings_mhy_like),
-                                    tint = colorScheme.onBackground
-                                )
-                            },
-                            checked = uiState.mhyLike,
-                            onCheckedChange = actions.onSetMhyLike
-                        )
-                        AnimatedVisibility(
-                            visible = uiState.mhyLike,
-                            enter = fadeIn() + expandVertically(),
-                            exit = fadeOut() + shrinkVertically(),
-                        ) {
-                        SwitchPreference(
-                            title = stringResource(id = R.string.settings_mhy_cancel_like),
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.Recommend,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = stringResource(id = R.string.settings_mhy_cancel_like),
-                                    tint = colorScheme.onBackground
-                                )
-                            },
-                            checked = uiState.mhyCancelLike,
-                            onCheckedChange = actions.onSetMhyCancelLike
-                        )
-                        }
-                        SwitchPreference(
-                            title = stringResource(id = R.string.settings_mhy_share),
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.Person,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = stringResource(id = R.string.settings_mhy_share),
-                                    tint = colorScheme.onBackground
-                                )
-                            },
-                            checked = uiState.mhyShare,
-                            onCheckedChange = actions.onSetMhyShare
-                        )
-                        OverlayDropdownPreference(
-                            title = stringResource(id = R.string.settings_mhy_captcha),
-                            items = listOf(
-                                stringResource(id = R.string.settings_mhy_captcha_skip),
-                                stringResource(id = R.string.settings_mhy_captcha_api),
-                            ),
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.Shield,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = stringResource(id = R.string.settings_mhy_captcha),
-                                    tint = colorScheme.onBackground
-                                )
-                            },
-                            selectedIndex = uiState.mhyCaptchaPolicy,
-                            onSelectedIndexChange = actions.onSetMhyCaptchaPolicy
-                        )
-                        if (uiState.mhyCaptchaPolicy == 1) {
-                            MultilineInputField(
-                                value = uiState.mhyCaptchaApiUrl,
-                                onValueChange = actions.onSetMhyCaptchaApiUrl,
-                                label = stringResource(id = R.string.settings_mhy_captcha_api_url),
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                            )
-                        }
-                            }
-                        }
                     }
 
                     // ==================== WorkBuddy ====================
@@ -410,50 +266,6 @@ fun SettingPagerMiuix(
                         }
 
                         WbSyncSection(uiState, actions)
-                    }
-
-                    // ==================== Bing ====================
-                    Card(
-                        modifier = Modifier
-                            .padding(top = 12.dp)
-                            .fillMaxWidth(),
-                    ) {
-                        SwitchPreference(
-                            title = stringResource(id = R.string.settings_bing_master),
-                            summary = stringResource(id = R.string.settings_bing_master_summary),
-                            startAction = {
-                                Icon(
-                                    Icons.Rounded.WorkspacePremium,
-                                    modifier = Modifier.padding(end = 6.dp),
-                                    contentDescription = stringResource(id = R.string.settings_bing_master),
-                                    tint = colorScheme.onBackground
-                                )
-                            },
-                            checked = uiState.bingMasterEnabled,
-                            onCheckedChange = actions.onSetBingMaster
-                        )
-                        AnimatedVisibility(
-                            visible = uiState.bingMasterEnabled,
-                            enter = fadeIn() + expandVertically(),
-                            exit = fadeOut() + shrinkVertically(),
-                        ) {
-                            Column {
-                                SwitchPreference(
-                                    title = stringResource(id = R.string.settings_bing_app_checkin),
-                                    summary = stringResource(id = R.string.settings_bing_app_checkin_summary),
-                                    startAction = {
-                                        Icon(
-                                            Icons.Rounded.Notifications,
-                                            modifier = Modifier.padding(end = 6.dp),
-                                            contentDescription = stringResource(id = R.string.settings_bing_app_checkin),
-                                            tint = colorScheme.onBackground
-                                        )
-                                    },
-                                    checked = uiState.bingAppCheckIn,
-                                    onCheckedChange = actions.onSetBingAppCheckIn
-                                )
-                            }
-                        }
                     }
 
                     // ==================== 通知与完成总览 ====================

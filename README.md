@@ -4,7 +4,7 @@
 
 # Fewards
 
-**Android auto check-in for HoYoLAB (米游社), WorkBuddy and Microsoft Rewards — one tap runs every daily task.**
+**Android auto check-in and credit dashboard for WorkBuddy — one tap runs the daily task and growth rewards.**
 
 [![Fewards](https://img.shields.io/badge/Fewards-AUTO-orange.svg)](https://github.com/functy23/fewards)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-purple.svg?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
@@ -56,20 +56,25 @@ Download the latest `Fewards-<version>-release.apk` (release + R8) from [Release
 
 | | |
 |---|---|
-| **HoYoLAB (米游社)** | QR-code login (stoken v2) or Cookie; daily check-in for Genshin Impact / Honkai: Star Rail / Zenless Zone Zero; 米游币 (Miyoushe Coin) tasks (community check-in / read posts / like / share); CAPTCHA strategy (skipped by default, optional captcha-solving API) |
-| **WorkBuddy** | WeChat / QQ QR-code authorization, or paste the desktop accessToken; automatic daily points check-in |
-| **Bing** (Microsoft Rewards) | Sign in to your Microsoft account in an embedded WebView (OAuth authorization code + refresh_token, so you stay signed in); claims the daily set / more promotions / read-to-earn cards and the Bing app daily check-in, and shows your points balance. **Claiming only — it never automates searches** |
+| **WorkBuddy check-in** | WeChat / QQ QR-code authorization, or paste the desktop accessToken; automatic daily points check-in |
+| **Growth center** | Travel gift, Buddy dispatch, tasks, missed-day make-up, streak rewards, blind boxes — runs right after check-in, or on demand with "Claim all" |
+| **Credits** | Per-account balance and package expiry, plus a dashboard on the Accounts tab: **total usable credits**, and how much expires **within 3 / 5 days** (per account too) |
+| **Credential upkeep** | Optional auto-refresh of near-expiry tokens, with a "Check & refresh" action and per-account time-to-live |
+| **Device sync** | Pairs with the desktop console over LAN: refresh → push → pull back, so both sides always share one refresh-token chain |
 
-- **Multiple accounts** — HoYoLAB (米游社), WorkBuddy and Microsoft Rewards all support several accounts; re-authorizing the same account updates it instead of adding a new one
+- **Multiple accounts** — re-authorizing the same account updates it instead of adding a new one
 - **One pipeline** — the home screen's "Start" button and the Control Center "check-in" tile run the same flow, with live progress notifications while it runs
 - **Keeps running in the background** — execution goes through WorkManager, so it still finishes after the process is killed
-- **Local-first** — credentials are stored only in the device's own SharedPreferences, and logs never print tokens / cookies
+- **Local-first** — credentials are stored only in the device's own SharedPreferences, and logs never print tokens
+
+> HoYoLAB (米游社) and Microsoft Rewards support was removed in this version: the app is WorkBuddy-only now.
+> Old `sec.mhy.accounts` / `sec.bing.accounts` keys are left untouched but no longer read.
 
 ## Usage
 
-1. **Accounts** — add one with "+" in the top-right corner: scan the QR code for HoYoLAB (米游社), or paste a Cookie containing stoken + mid; for WorkBuddy, authorize by scanning with WeChat / QQ, or paste the desktop accessToken; for Microsoft Rewards, sign in with your Microsoft account in the built-in page, or paste a refresh_token
-2. **Settings** — toggle individual tasks, the CAPTCHA strategy, notifications and the completion overview
-3. **Home** — tick the tasks → Start
+1. **Accounts** — tap "+" in the top-right corner and scan with WeChat / QQ, or paste the desktop accessToken. The account row shows its remaining credits and how much expires within 3 / 5 days; the star button opens the per-package credit details
+2. **Settings** — toggle the growth center, credential auto-refresh, device sync, notifications and the completion overview
+3. **Home** — keep WorkBuddy ticked → Start
 
 On macOS, to grab the desktop token directly:
 
@@ -135,9 +140,8 @@ Toolchain: AGP 9.4.0 / Kotlin 2.4.10 / Compose BOM 2026.08.00 / miuix 0.9.4 / mi
 
 ```
 app/src/main/java/com/functy/fewards/
-├── core/mihoyo/          # DS signing, constants, HTTP, engine
-├── core/workbuddy/       # check-in engine, QR authorization protocol
-├── core/bing/            # Microsoft Rewards dapi client, OAuth, claim rules
+├── core/workbuddy/       # check-in engine, growth center, credits, QR authorization, refresh
+├── core/lansync/         # LAN sync protocol and HTTP client
 ├── data/repository/      # settings, accounts, config import/export
 ├── ui/screen/            # home / accounts / settings / theme / about (Miuix)
 ├── ui/viewmodel/
@@ -148,11 +152,11 @@ Agent conventions live in [AGENTS.md](AGENTS.md).
 
 ## APIs and references
 
-- HoYoLAB (米游社) DS salt, act_id and endpoints follow [MiyoQian](https://github.com/Womsxd/MiyoQian); after sniffing traffic you can edit `DsSign.kt` / `MihoyoConstants.kt`; the stoken → cookie exchange goes through `getCookieAccountInfoBySToken`
 - WorkBuddy check-in: `copilot.tencent.com/billing/meter/*`
 - WorkBuddy QR authorization: `copilot.tencent.com/v2/plugin/auth/state|token` + `/v2/plugin/login/account` (`platform=CLI`; a non-zero code before the QR code is scanned is the normal waiting state)
-- Microsoft Rewards: OAuth authorization code against `login.live.com/oauth20_authorize.srf` (public client, `scope=service::prod.rewardsplatform.microsoft.com::MBI_SSL`, redirect `oauth20_desktop.srf`), then the dapi backend — `GET prod.rewardsplatform.microsoft.com/dapi/me?channel=SAAndroid&options=511` and `POST /dapi/me/activities` (`type:101` + `offerid` to claim a card, `type:103` for the Bing app daily check-in). Searches are deliberately **not** automated
-- Captcha-solving API: POST `{gt, challenge}` → `{validate}`
+- WorkBuddy growth center: `www.codebuddy.cn/v2/activity/growth/*` (travel / tasks / streak / makeup-cards / redeem / lottery / buddy boxes)
+- WorkBuddy credits: `www.codebuddy.cn/billing/meter/get-user-resource-summary` for the authoritative amounts, plus `get-user-resource-paid-packages` / `-free-packages` for package expiry. Per-package expiry is the earliest still-funded record, and `DeductionEndTime` is treated as a 30-day placeholder when it is a whole month past `CycleEndTime`
+- WorkBuddy token refresh: `POST /v2/plugin/auth/token/refresh` with `X-Refresh-Token` + the desktop fingerprint headers
 - UI references: [KernelSU manager](https://github.com/tiann/KernelSU) and [InstallerX Revived](https://github.com/wxxsfxyzm/InstallerX-Revived)
 
 Earlier repositories with the same functionality are archived — use only this one: [autofewards](https://github.com/functy23/autofewards), [autorewards-runner](https://github.com/functy23/autorewards-runner) (the Flutter original).

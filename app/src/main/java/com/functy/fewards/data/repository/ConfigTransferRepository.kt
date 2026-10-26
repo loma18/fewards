@@ -1,9 +1,6 @@
 package com.functy.fewards.data.repository
 
 import com.functy.fewards.core.AppLog
-import com.functy.fewards.core.bing.BingIdentity
-import com.functy.fewards.core.mihoyo.MihoyoApi
-import com.functy.fewards.core.mihoyo.MihoyoProfileHydrator
 import com.functy.fewards.core.workbuddy.WorkBuddyLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -11,9 +8,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 配置导入/导出：
- * 导出 JSON：{"_format":"fewards-config","version":1,"mihoyos":[{...}],"workbuddies":[{...}],"bings":[{...}]}
- * 导入：解析上述格式（兼容裸 cookie / 裸 JWT），逐条合并入账号仓储。
+ * 配置导入/导出：只处理 WorkBuddy。
+ *
+ * 导出：`{"_format":"fewards-config","version":1,"workbuddies":[{...}]}`
+ * 导入：兼容裸 JWT 与旧版整包配置（旧文件里的 mihoyos / bings 会被忽略并提示）。
  */
 class ConfigTransferRepository(
     private val accounts: AccountRepository = AccountRepository(),
@@ -23,19 +21,6 @@ class ConfigTransferRepository(
         val root = JSONObject()
             .put("_format", ConfigTransferParser.FORMAT)
             .put("version", ConfigTransferParser.VERSION)
-        val mhyArr = JSONArray()
-        accounts.mihoyoAccounts().forEach { a ->
-            mhyArr.put(
-                JSONObject()
-                    .put("id", a.id)
-                    .put("nickname", a.nickname)
-                    .put("stoken", a.stoken)
-                    .put("stuid", a.stuid)
-                    .put("mid", a.mid)
-                    .put("cookie", a.cookie)
-            )
-        }
-        root.put("mihoyos", mhyArr)
         val wbArr = JSONArray()
         accounts.workBuddyAccounts().forEach { a ->
             wbArr.put(
@@ -51,41 +36,18 @@ class ConfigTransferRepository(
             )
         }
         root.put("workbuddies", wbArr)
-        val bingArr = JSONArray()
-        accounts.bingAccounts().forEach { a ->
-            bingArr.put(
-                JSONObject()
-                    .put("id", a.id)
-                    .put("label", a.label)
-                    .put("refreshToken", a.refreshToken)
-                    .put("country", a.country)
-            )
-        }
-        root.put("bings", bingArr)
         root.toString(2)
     }
 
     data class ImportResult(
-        val mihoyo: Int,
         val workbuddy: Int,
-        val bing: Int = 0,
+        /** 旧配置里被忽略的米游社 / Bing 账号数 */
+        val ignoredLegacy: Int = 0,
         val errors: List<String>,
     )
 
     suspend fun import(json: String): ImportResult = withContext(Dispatchers.IO) {
         val parsed = ConfigTransferParser.parse(json)
-        parsed.mihoyos.forEach { d ->
-            accounts.addMihoyoAccount(
-                AccountRepository.MihoyoAccount(
-                    id = d.id,
-                    nickname = d.nickname,
-                    stoken = d.stoken,
-                    stuid = d.stuid,
-                    mid = d.mid,
-                    cookie = d.cookie,
-                )
-            )
-        }
         parsed.workbuddies.forEach { d ->
             val profile = WorkBuddyLabel.decodeProfile(d.token)
             accounts.addWorkBuddyAccount(
@@ -104,31 +66,7 @@ class ConfigTransferRepository(
                 )
             )
         }
-        parsed.bings.forEach { d ->
-            // 按 refresh_token 的不可逆指纹生成 id，保证重复导入同一份配置不会多出账号
-            val token = d.refreshToken
-            accounts.addBingAccount(
-                AccountRepository.BingAccount(
-                    id = d.id.ifEmpty { BingIdentity.accountId(token) },
-                    label = d.label.ifEmpty { BingIdentity.fallbackLabel(token) },
-                    refreshToken = token,
-                    country = d.country,
-                )
-            )
-        }
-        val api = MihoyoApi(MihoyoApi.defaultClient())
-        accounts.mihoyoAccounts()
-            .filter { MihoyoProfileHydrator.needsHydration(it) }
-            .forEach { acc ->
-                if (!MihoyoProfileHydrator.markAttempted(acc.id)) return@forEach
-                val next = MihoyoProfileHydrator.hydrate(api, acc)
-                if (next != acc) accounts.addMihoyoAccount(next)
-            }
-        AppLog.i(
-            "SYS",
-            "导入完成：米游社 " + parsed.mihoyos.size + " 个，WorkBuddy " + parsed.workbuddies.size +
-                " 个，Bing " + parsed.bings.size + " 个"
-        )
-        ImportResult(parsed.mihoyos.size, parsed.workbuddies.size, parsed.bings.size, parsed.errors)
+        AppLog.i("SYS", "导入完成：WorkBuddy " + parsed.workbuddies.size + " 个")
+        ImportResult(parsed.workbuddies.size, parsed.ignoredLegacy, parsed.errors)
     }
 }

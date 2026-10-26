@@ -70,41 +70,14 @@ class SettingsRepositoryImpl : SettingsRepository {
         get() = prefs.getFloat("overview_hold_seconds", 0.5f)
         set(value) = prefs.edit { putFloat("overview_hold_seconds", value) }
 
-    override var mhyMasterEnabled: Boolean
-        get() = prefs.getBoolean("mhy_master_enabled", true)
-        set(value) = prefs.edit { putBoolean("mhy_master_enabled", value) }
 
-    override var mhyGameSign: Boolean
-        get() = prefs.getBoolean("mhy_game_sign", true)
-        set(value) = prefs.edit { putBoolean("mhy_game_sign", value) }
 
-    override var mhyBbsSign: Boolean
-        get() = prefs.getBoolean("mhy_bbs_sign", true)
-        set(value) = prefs.edit { putBoolean("mhy_bbs_sign", value) }
 
-    override var mhyRead: Boolean
-        get() = prefs.getBoolean("mhy_read", true)
-        set(value) = prefs.edit { putBoolean("mhy_read", value) }
 
-    override var mhyLike: Boolean
-        get() = prefs.getBoolean("mhy_like", true)
-        set(value) = prefs.edit { putBoolean("mhy_like", value) }
 
-    override var mhyCancelLike: Boolean
-        get() = prefs.getBoolean("mhy_cancel_like", true)
-        set(value) = prefs.edit { putBoolean("mhy_cancel_like", value) }
 
-    override var mhyShare: Boolean
-        get() = prefs.getBoolean("mhy_share", true)
-        set(value) = prefs.edit { putBoolean("mhy_share", value) }
 
-    override var mhyCaptchaPolicy: Int
-        get() = prefs.getInt("mhy_captcha_policy", 0)
-        set(value) = prefs.edit { putInt("mhy_captcha_policy", value) }
 
-    override var mhyCaptchaApiUrl: String
-        get() = prefs.getString("mhy_captcha_api_url", "") ?: ""
-        set(value) = prefs.edit { putString("mhy_captcha_api_url", value) }
 
     override var wbMasterEnabled: Boolean
         get() = prefs.getBoolean("wb_master_enabled", true)
@@ -134,11 +107,5 @@ class SettingsRepositoryImpl : SettingsRepository {
         get() = prefs.getLong("wb_sync_last_at", 0L)
         set(value) = prefs.edit { putLong("wb_sync_last_at", value) }
 
-    override var bingMasterEnabled: Boolean
-        get() = prefs.getBoolean("bing_master_enabled", true)
-        set(value) = prefs.edit { putBoolean("bing_master_enabled", value) }
 
-    override var bingAppCheckIn: Boolean
-        get() = prefs.getBoolean("bing_app_checkin", true)
-        set(value) = prefs.edit { putBoolean("bing_app_checkin", value) }
 }

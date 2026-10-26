@@ -17,17 +17,6 @@ data class SettingsUiState(
     val enableFloatingBottomBarBlur: Boolean = false,
     val pageScale: Float = 1.0f,
 
-    // 米游社
-    val mhyMasterEnabled: Boolean = true,
-    val mhyGameSign: Boolean = true,
-    val mhyBbsSign: Boolean = true,
-    val mhyRead: Boolean = true,
-    val mhyLike: Boolean = true,
-    val mhyCancelLike: Boolean = true,
-    val mhyShare: Boolean = true,
-    val mhyCaptchaPolicy: Int = 0, // 0 跳过并记录；1 打码接口
-    val mhyCaptchaApiUrl: String = "",
-
     // WorkBuddy
     val wbMasterEnabled: Boolean = true,
     /** 签到后自动跑成长中心（旅行 / 任务 / 补登 / 兑换 / 盲盒） */
@@ -59,10 +48,6 @@ data class SettingsUiState(
     /** WorkBuddy 账号列表（设置页要展示勾选清单） */
     val wbAccounts: List<com.functy.fewards.data.repository.AccountRepository.WorkBuddyAccount> = emptyList(),
 
-    // Bing
-    val bingMasterEnabled: Boolean = true,
-    val bingAppCheckIn: Boolean = true,
-
     // 通知与完成总览
     val taskNotification: Boolean = true,
     val overviewAutoDismiss: Boolean = true,
@@ -72,16 +57,6 @@ data class SettingsUiState(
 @Immutable
 data class SettingsScreenActions(
     val onOpenTheme: () -> Unit,
-    // 米游社
-    val onSetMhyMaster: (Boolean) -> Unit,
-    val onSetMhyGameSign: (Boolean) -> Unit,
-    val onSetMhyBbsSign: (Boolean) -> Unit,
-    val onSetMhyRead: (Boolean) -> Unit,
-    val onSetMhyLike: (Boolean) -> Unit,
-    val onSetMhyCancelLike: (Boolean) -> Unit,
-    val onSetMhyShare: (Boolean) -> Unit,
-    val onSetMhyCaptchaPolicy: (Int) -> Unit,
-    val onSetMhyCaptchaApiUrl: (String) -> Unit,
     // WorkBuddy
     val onSetWbMaster: (Boolean) -> Unit,
     /** 签到后自动跑成长中心 */
@@ -100,9 +75,6 @@ data class SettingsScreenActions(
     val onSelectAllWbSync: (Boolean) -> Unit,
     /** 一键同步选中账号：刷新 → 推送 → 取回（刷新会轮换 refresh_token） */
     val onSyncWbAccounts: () -> Unit,
-    // Bing
-    val onSetBingMaster: (Boolean) -> Unit,
-    val onSetBingAppCheckIn: (Boolean) -> Unit,
     // 通知与完成总览
     val onSetTaskNotification: (Boolean) -> Unit,
     val onSetOverviewAutoDismiss: (Boolean) -> Unit,

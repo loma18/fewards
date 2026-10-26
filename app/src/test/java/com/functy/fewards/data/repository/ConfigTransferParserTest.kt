@@ -5,93 +5,87 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * 配置解析：只认 WorkBuddy。
+ *
+ * 米游社 / Bing 移除后，旧备份里的 `mihoyos` / `bings` 必须被**忽略而不是报错**——
+ * 用户拿去年的备份导入时，不该看到一串失败，也不该以为数据丢了。
+ */
 class ConfigTransferParserTest {
 
     @Test
-    fun parsesFewardsConfigBundle() {
+    fun parsesWorkBuddyFromBundle() {
         val json = """
             {
               "_format": "fewards-config",
               "version": 1,
-              "mihoyos": [{"stoken":"v2_a","stuid":"1","mid":"m","cookie":"stoken=v2_a; account_id=1; mid=m"}],
-              "workbuddies": [{"token":"eyJhbGciOiJub25lIn0.e30.x","label":"WB"}]
+              "workbuddies": [{"token":"eyJhbGciOiJub25lIn0.e30.x","label":"WB","uid":"u1"}]
             }
         """.trimIndent()
         val parsed = ConfigTransferParser.parse(json)
-        assertEquals(1, parsed.mihoyos.size)
-        assertEquals("v2_a", parsed.mihoyos[0].stoken)
         assertEquals(1, parsed.workbuddies.size)
         assertEquals("WB", parsed.workbuddies[0].label)
+        assertEquals("u1", parsed.workbuddies[0].uid)
+        assertEquals(0, parsed.ignoredLegacy)
         assertTrue(parsed.errors.isEmpty())
     }
 
     @Test
-    fun parsesBingAccountsFromBundle() {
+    fun legacySectionsAreIgnoredWithNotice() {
+        // 旧备份同时有米游社和 Bing：不导入，但要说明一句
         val json = """
             {
               "_format": "fewards-config",
               "version": 1,
-              "bings": [
-                {"id":"bing_abc","label":"Bing · abc123","refreshToken":"RT-abcdefghijklmnop","country":"CN"},
-                {"label":"只有 refresh_token 也算数","refreshToken":"RT-2"}
-              ]
+              "mihoyos": [{"stoken":"v2_a","stuid":"1"}],
+              "bings": [{"refreshToken":"RT-abcdefghijklmnop"}],
+              "workbuddies": [{"token":"eyJhbGciOiJub25lIn0.e30.x"}]
             }
         """.trimIndent()
         val parsed = ConfigTransferParser.parse(json)
-        assertEquals(2, parsed.bings.size)
-        assertEquals("bing_abc", parsed.bings[0].id)
-        assertEquals("CN", parsed.bings[0].country)
-        // 缺 id 时用序号兜底，不能整条丢掉
-        assertEquals("bing_1", parsed.bings[1].id)
-        assertTrue(parsed.errors.isEmpty())
+        assertEquals(1, parsed.workbuddies.size)
+        assertEquals(2, parsed.ignoredLegacy)
+        assertEquals(1, parsed.errors.size)
+        assertTrue(parsed.errors[0].contains("已忽略"))
     }
 
     @Test
-    fun skipsBingEntryWithoutRefreshToken() {
-        val json = """{"_format":"fewards-config","bings":[{"label":"没有凭据"}]}"""
+    fun skipsWorkBuddyEntryWithoutToken() {
+        val json = """{"_format":"fewards-config","workbuddies":[{"label":"没有凭据"}]}"""
         val parsed = ConfigTransferParser.parse(json)
-        assertTrue(parsed.bings.isEmpty())
+        assertTrue(parsed.workbuddies.isEmpty())
         assertEquals(1, parsed.errors.size)
     }
 
     @Test
-    fun bundleWithoutBingSectionStillParses() {
-        // 老配置（加 Bing 之前导出的）必须继续能导入
+    fun bundleWithoutWorkBuddiesIsStillFine() {
         val json = """{"_format":"fewards-config","version":1,"mihoyos":[],"workbuddies":[]}"""
         val parsed = ConfigTransferParser.parse(json)
-        assertTrue(parsed.bings.isEmpty())
+        assertTrue(parsed.workbuddies.isEmpty())
         assertTrue(parsed.errors.isEmpty())
-    }
-
-    @Test
-    fun skipsIncompleteMihoyoEntries() {
-        val json = """{"_format":"fewards-config","mihoyos":[{"stoken":"only"}],"workbuddies":[{"token":""}]}"""
-        val parsed = ConfigTransferParser.parse(json)
-        assertTrue(parsed.mihoyos.isEmpty())
-        assertTrue(parsed.workbuddies.isEmpty())
-        assertEquals(2, parsed.errors.size)
-    }
-
-    @Test
-    fun bareCookieDoesNotNeedToBeJson() {
-        val parsed = ConfigTransferParser.parse("stoken=v2_abc; mid=xyz; account_id=10001")
-        assertEquals(1, parsed.mihoyos.size)
-        assertEquals("10001", parsed.mihoyos[0].stuid)
-        assertTrue(parsed.workbuddies.isEmpty())
     }
 
     @Test
     fun bareJwtStartsWithEyJ() {
         val parsed = ConfigTransferParser.parse("eyJhbGciOiJub25lIn0.e30.sig")
         assertEquals(1, parsed.workbuddies.size)
-        assertTrue(parsed.mihoyos.isEmpty())
+        assertEquals("wb_import", parsed.workbuddies[0].id)
+    }
+
+    @Test
+    fun legacyMihoyoCookieIsRejectedWithClearReason() {
+        // 裸 Cookie 曾用于导入米游社；现在没有对应功能，必须给可读原因而不是"格式错误"
+        val parsed = ConfigTransferParser.parse("stoken=v2_abc; mid=xyz; account_id=10001")
+        assertFalse(parsed.recognized)
+        assertTrue(parsed.workbuddies.isEmpty())
+        assertTrue(parsed.errors[0].contains("米游社"))
     }
 
     @Test
     fun garbageIsUnrecognized() {
         val parsed = ConfigTransferParser.parse("hello world")
         assertFalse(parsed.recognized)
-        assertTrue(parsed.mihoyos.isEmpty())
+        assertTrue(parsed.workbuddies.isEmpty())
     }
 
     @Test

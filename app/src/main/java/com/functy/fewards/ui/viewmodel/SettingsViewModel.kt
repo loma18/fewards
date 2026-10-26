@@ -67,16 +67,6 @@ class SettingsViewModel(
                     enableFloatingBottomBar = repo.enableFloatingBottomBar,
                     enableFloatingBottomBarBlur = repo.enableFloatingBottomBarBlur,
                     pageScale = repo.pageScale,
-                    // 米游社
-                    mhyMasterEnabled = repo.mhyMasterEnabled,
-                    mhyGameSign = repo.mhyGameSign,
-                    mhyBbsSign = repo.mhyBbsSign,
-                    mhyRead = repo.mhyRead,
-                    mhyLike = repo.mhyLike,
-                    mhyCancelLike = repo.mhyCancelLike,
-                    mhyShare = repo.mhyShare,
-                    mhyCaptchaPolicy = repo.mhyCaptchaPolicy,
-                    mhyCaptchaApiUrl = repo.mhyCaptchaApiUrl,
                     // WorkBuddy
                     wbMasterEnabled = repo.wbMasterEnabled,
                     wbGrowthEnabled = repo.wbGrowthEnabled,
@@ -87,9 +77,6 @@ class SettingsViewModel(
                     wbSyncPairCode = repo.wbSyncPairCode,
                     wbSyncForcePush = repo.wbSyncForcePush,
                     wbSyncLastAt = repo.wbSyncLastAt,
-                    // Bing
-                    bingMasterEnabled = repo.bingMasterEnabled,
-                    bingAppCheckIn = repo.bingAppCheckIn,
                     // 通知与完成总览
                     taskNotification = repo.taskNotification,
                     overviewAutoDismiss = repo.overviewAutoDismiss,
@@ -167,53 +154,6 @@ class SettingsViewModel(
     fun setPageScale(scale: Float) {
         repo.pageScale = scale
         _uiState.update { it.copy(pageScale = scale) }
-    }
-
-    // ==================== 米游社 ====================
-
-    fun setMhyMasterEnabled(enabled: Boolean) {
-        repo.mhyMasterEnabled = enabled
-        _uiState.update { it.copy(mhyMasterEnabled = enabled) }
-    }
-
-    fun setMhyGameSign(enabled: Boolean) {
-        repo.mhyGameSign = enabled
-        _uiState.update { it.copy(mhyGameSign = enabled) }
-    }
-
-    fun setMhyBbsSign(enabled: Boolean) {
-        repo.mhyBbsSign = enabled
-        _uiState.update { it.copy(mhyBbsSign = enabled) }
-    }
-
-    fun setMhyRead(enabled: Boolean) {
-        repo.mhyRead = enabled
-        _uiState.update { it.copy(mhyRead = enabled) }
-    }
-
-    fun setMhyLike(enabled: Boolean) {
-        repo.mhyLike = enabled
-        _uiState.update { it.copy(mhyLike = enabled) }
-    }
-
-    fun setMhyCancelLike(enabled: Boolean) {
-        repo.mhyCancelLike = enabled
-        _uiState.update { it.copy(mhyCancelLike = enabled) }
-    }
-
-    fun setMhyShare(enabled: Boolean) {
-        repo.mhyShare = enabled
-        _uiState.update { it.copy(mhyShare = enabled) }
-    }
-
-    fun setMhyCaptchaPolicy(policy: Int) {
-        repo.mhyCaptchaPolicy = policy
-        _uiState.update { it.copy(mhyCaptchaPolicy = policy) }
-    }
-
-    fun setMhyCaptchaApiUrl(url: String) {
-        repo.mhyCaptchaApiUrl = url
-        _uiState.update { it.copy(mhyCaptchaApiUrl = url) }
     }
 
     // ==================== WorkBuddy ====================
@@ -650,18 +590,6 @@ class SettingsViewModel(
         "skipped-dead" -> "凭据已失效"
         "skipped-duplicate" -> "重复账号，已跳过"
         else -> action
-    }
-
-    // ==================== Bing ====================
-
-    fun setBingMasterEnabled(enabled: Boolean) {
-        repo.bingMasterEnabled = enabled
-        _uiState.update { it.copy(bingMasterEnabled = enabled) }
-    }
-
-    fun setBingAppCheckIn(enabled: Boolean) {
-        repo.bingAppCheckIn = enabled
-        _uiState.update { it.copy(bingAppCheckIn = enabled) }
     }
 
     // ==================== 通知与完成总览 ====================

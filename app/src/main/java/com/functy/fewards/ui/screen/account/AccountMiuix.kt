@@ -1,12 +1,12 @@
 package com.functy.fewards.ui.screen.account
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -15,13 +15,13 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
@@ -32,10 +32,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -45,29 +44,30 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.functy.fewards.R
+import com.functy.fewards.core.workbuddy.WorkBuddyCredits
+import com.functy.fewards.data.repository.AccountRepository
 import com.functy.fewards.ui.component.IconSquircleCornerFraction
 import com.functy.fewards.ui.component.miuix.AddAccountDialog
-import com.functy.fewards.ui.component.miuix.BingAuthWebView
 import com.functy.fewards.ui.component.miuix.WbCreditsDialog
 import com.functy.fewards.ui.viewmodel.AccountViewModel
-import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.DropdownDefaults
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
-import top.yukonga.miuix.kmp.basic.ListPopupColumn
-import top.yukonga.miuix.kmp.basic.ListPopupDefaults
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.Text
@@ -78,15 +78,17 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
-import top.yukonga.miuix.kmp.window.WindowListPopup
-import kotlin.math.roundToInt
 
 /**
- * 账号页（Miuix）：
- *  - 只展示已登录账号，米游社 / WorkBuddy / Bing 用灰色小标题分组；
- *  - 右上角「+」弹出列表，选择要添加哪一类账号；
- *  - 三者都打开同一个 AddAccountDialog：米游社与 WorkBuddy 是「扫码 / 凭据」，
- *    Bing 是「内嵌 WebView 授权 / refresh_token」——它没有二维码，主区换成授权页。
+ * 账号页（Miuix）：只管理 WorkBuddy 账号。
+ *
+ * 结构：
+ *  - 顶部积分汇总卡：总剩余可用积分 + 3 日内 / 5 日内到期可用积分；
+ *  - WorkBuddy 账号列表：每行显示该账号的剩余与 3/5 日内到期额度，
+ *    行尾星标按钮打开逐笔积分明细；
+ *  - 右上角「+」直接打开添加弹窗（只剩一种账号类型，不再需要二级菜单）。
+ *
+ * 米游社与 Bing 已移除，历史账号数据不再读取。
  */
 @Composable
 fun AccountPagerMiuix(
@@ -122,96 +124,23 @@ fun AccountPagerMiuix(
         (TopAppBarDefaults.CollapsedHeight / 2).toPx() + titleLineHeightPx / 2f
     }
 
-    var showAddMenu by remember { mutableStateOf(false) }
     // show* 驱动 WindowDialog 的开合；mounted* 保证关闭动画播完之前不卸载弹窗
-    // （切到 Cookie/Token Tab 会立刻把 qrState 归零，只靠 qrState 判断会动画演一半就消失）
-    var showMhyDialog by remember { mutableStateOf(false) }
+    // （切到 Token Tab 会立刻把 qrState 归零，只靠 qrState 判断会动画演一半就消失）
     var showWbDialog by remember { mutableStateOf(false) }
-    var showBingDialog by remember { mutableStateOf(false) }
-    var mhyDialogMounted by remember { mutableStateOf(false) }
     var wbDialogMounted by remember { mutableStateOf(false) }
-    var bingDialogMounted by remember { mutableStateOf(false) }
 
     // 扫码成功才自动关弹窗；过期 / 失败保持打开以露出「重新获取」
-    LaunchedEffect(state.qrState) {
-        if (state.qrState == QrState.Confirmed) showMhyDialog = false
-    }
     LaunchedEffect(state.wbQrState) {
         if (state.wbQrState == QrState.Confirmed) showWbDialog = false
-    }
-    // Bing：授权换 token 成功才自动关弹窗
-    LaunchedEffect(state.bingAuthPhase) {
-        if (state.bingAuthPhase == QrState.Confirmed) showBingDialog = false
     }
     // 停在扫码 Tab 且没有活着的会话时申请二维码。
     // 以「弹窗开合 + Tab」为 key：弹窗弹出动画（folme spring）结束后才申请，
     // 切走再切回扫码 Tab 也会重新申请一张新码；过期 / 失败后重开同样能自愈。
-    LaunchedEffect(showMhyDialog, state.loginMode) {
-        if (!showMhyDialog || state.loginMode != 0) return@LaunchedEffect
-        if (state.qrState == QrState.Waiting || state.qrState == QrState.Scanned) return@LaunchedEffect
-        kotlinx.coroutines.delay(450)
-        if (showMhyDialog && state.loginMode == 0) actions.onStartQr()
-    }
     LaunchedEffect(showWbDialog, state.wbLoginMode) {
         if (!showWbDialog || state.wbLoginMode != 0) return@LaunchedEffect
         if (state.wbQrState == QrState.Waiting || state.wbQrState == QrState.Scanned) return@LaunchedEffect
         kotlinx.coroutines.delay(450)
         if (showWbDialog && state.wbLoginMode == 0) actions.onStartWbQr()
-    }
-    // Bing 授权页只是本地拼 URL，同样等弹窗动画结束再生成，避免每帧换一次 state
-    LaunchedEffect(showBingDialog, state.bingLoginMode) {
-        if (!showBingDialog || state.bingLoginMode != 0) return@LaunchedEffect
-        if (state.bingAuthPhase == QrState.Waiting) return@LaunchedEffect
-        kotlinx.coroutines.delay(450)
-        if (showBingDialog && state.bingLoginMode == 0) actions.onStartBingAuth()
-    }
-
-    if (mhyDialogMounted) {
-        AddAccountDialog(
-            show = showMhyDialog,
-            title = stringResource(R.string.account_add_miyoushe),
-            tabs = listOf(
-                stringResource(R.string.miyoushe_login_qr),
-                stringResource(R.string.miyoushe_login_cookie),
-            ),
-            selectedTab = state.loginMode,
-            onTabSelected = { tab ->
-                dismissInput()
-                actions.onSetLoginMode(tab)
-                // 离开扫码 Tab 时停掉轮询；再切回扫码时下面那个 LaunchedEffect 会重新申请一张新二维码
-                if (tab != 0) actions.onCancelQr()
-            },
-            // 空闲 / 加载中不显示上一轮的二维码（切走再切回时先转圈，而不是闪一张旧码）；
-            // 过期 / 失败仍保留那张码，配合「已失效 + 重新获取」。
-            qrContent = when (state.qrState) {
-                QrState.Idle, QrState.Loading -> ""
-                else -> state.qrContent
-            },
-            qrMessage = stringResource(
-                when (state.qrState) {
-                    QrState.Scanned -> R.string.miyoushe_qr_scanned
-                    QrState.Expired -> R.string.qr_expired
-                    QrState.Error -> R.string.qr_failed
-                    else -> R.string.miyoushe_qr_wait_scan
-                }
-            ),
-            canRetry = state.qrState == QrState.Expired || state.qrState == QrState.Error,
-            credentialLabel = stringResource(R.string.miyoushe_cookie_hint),
-            credentialAction = stringResource(R.string.miyoushe_cookie_import),
-            onImportCredential = { raw ->
-                dismissInput()
-                val accepted = actions.onImportCookie(raw)
-                // 接受后关弹窗（走 WindowDialog 的淡出动画）；失败则留在原地让用户改
-                if (accepted) showMhyDialog = false
-                accepted
-            },
-            onDismissRequest = { showMhyDialog = false },
-            onDismissFinished = {
-                mhyDialogMounted = false
-                actions.onCancelQr()
-            },
-            onRetry = { actions.onStartQr() },
-        )
     }
 
     if (wbDialogMounted) {
@@ -226,20 +155,30 @@ fun AccountPagerMiuix(
             onTabSelected = { tab ->
                 dismissInput()
                 actions.onSetWbLoginMode(tab)
+                // 离开扫码 Tab 时停掉轮询；再切回扫码时上面那个 LaunchedEffect 会重新申请一张新码
                 if (tab != 0) actions.onCancelWbQr()
             },
+            // 空闲 / 加载中不显示上一轮的二维码（切走再切回时先转圈，而不是闪一张旧码）；
+            // 过期 / 失败仍保留那张码，配合「已失效 + 重新获取」。
             qrContent = when (state.wbQrState) {
                 QrState.Idle, QrState.Loading -> ""
                 else -> state.wbQrContent
             },
-            qrMessage = when (state.wbQrState) {
-                QrState.Expired -> stringResource(R.string.qr_expired)
-                QrState.Error -> {
-                    // 把真实原因带上：只显示「获取二维码失败」时，用户和开发者都无从下手
-                    val base = stringResource(R.string.qr_failed)
-                    if (state.wbQrError.isBlank()) base else "$base：${state.wbQrError}"
+            qrMessage = buildString {
+                append(
+                    stringResource(
+                        when (state.wbQrState) {
+                            QrState.Scanned -> R.string.workbuddy_qr_scanned
+                            QrState.Expired -> R.string.qr_expired
+                            QrState.Error -> R.string.qr_failed
+                            else -> R.string.workbuddy_qr_wait_scan
+                        }
+                    )
+                )
+                // 失败时把真实原因带上，否则用户只能看到一句无法排查的通用文案
+                if (state.wbQrState == QrState.Error && state.wbQrError.isNotEmpty()) {
+                    append("：").append(state.wbQrError)
                 }
-                else -> stringResource(R.string.workbuddy_qr_wait_scan)
             },
             canRetry = state.wbQrState == QrState.Expired || state.wbQrState == QrState.Error,
             credentialLabel = stringResource(R.string.workbuddy_token_hint),
@@ -256,63 +195,6 @@ fun AccountPagerMiuix(
                 actions.onCancelWbQr()
             },
             onRetry = { actions.onStartWbQr() },
-        )
-    }
-
-    if (bingDialogMounted) {
-        AddAccountDialog(
-            show = showBingDialog,
-            title = stringResource(R.string.account_add_bing),
-            tabs = listOf(
-                stringResource(R.string.bing_login_web),
-                stringResource(R.string.bing_login_token),
-            ),
-            selectedTab = state.bingLoginMode,
-            onTabSelected = { tab ->
-                dismissInput()
-                actions.onSetBingLoginMode(tab)
-                if (tab != 0) actions.onCancelBingAuth()
-            },
-            // Bing 没有二维码：主区由 primaryContent 换成授权页
-            qrContent = "",
-            qrMessage = stringResource(
-                when (state.bingAuthPhase) {
-                    QrState.Loading -> R.string.bing_web_processing
-                    QrState.Expired -> R.string.qr_expired
-                    QrState.Error -> R.string.qr_failed
-                    else -> R.string.bing_web_hint
-                }
-            ),
-            canRetry = state.bingAuthPhase == QrState.Expired || state.bingAuthPhase == QrState.Error,
-            credentialLabel = stringResource(R.string.bing_token_hint),
-            credentialAction = stringResource(R.string.bing_token_import),
-            onImportCredential = { raw ->
-                dismissInput()
-                val accepted = actions.onImportBingToken(raw)
-                if (accepted) showBingDialog = false
-                accepted
-            },
-            onDismissRequest = { showBingDialog = false },
-            onDismissFinished = {
-                bingDialogMounted = false
-                actions.onCancelBingAuth()
-            },
-            onRetry = { actions.onStartBingAuth() },
-            primaryContent = {
-                if (state.bingAuthUrl.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().height(420.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        InfiniteProgressIndicator(color = colorScheme.primary)
-                    }
-                } else {
-                    BingAuthWebView(
-                        url = state.bingAuthUrl,
-                        onRedirect = { url -> actions.onBingRedirect(url) },
-                    )
-                }
-            },
         )
     }
 
@@ -348,63 +230,16 @@ fun AccountPagerMiuix(
                         IconButton(
                             onClick = {
                                 dismissInput()
-                                showAddMenu = true
+                                actions.onSetWbLoginMode(0)
+                                wbDialogMounted = true
+                                showWbDialog = true
                             },
-                            // 带圈按钮：miuix IconButton 的 minWidth/minHeight 与默认
-                            // cornerRadius 都是 40dp，给个底色就是正圆。
-                            backgroundColor = colorScheme.surfaceContainerHigh,
                         ) {
                             Icon(
                                 Icons.Rounded.Add,
                                 contentDescription = stringResource(R.string.account_add),
-                                tint = colorScheme.onSurface,
+                                tint = colorScheme.onBackground,
                             )
-                        }
-                        WindowListPopup(
-                            show = showAddMenu,
-                            // 加一点水平边距，否则菜单右边缘会贴着屏幕右边
-                            popupPositionProvider = ListPopupDefaults.dropdownPositionProvider(
-                                horizontalMargin = 12.dp,
-                            ),
-                            onDismissRequest = { showAddMenu = false },
-                        ) {
-                            val addOptions = listOf(
-                                stringResource(R.string.account_add_miyoushe),
-                                stringResource(R.string.account_add_workbuddy),
-                                stringResource(R.string.account_add_bing),
-                            )
-                            ListPopupColumn {
-                                // 不用 miuix 的 DropdownImpl：它恒定给尾部的「选中勾」留
-                                // CheckIconStartPadding + CheckIconSize（≈32dp），
-                                // 这里没有选中态，那道槽位就成了文字后面的一段空白。
-                                addOptions.forEachIndexed { index, text ->
-                                    AddMenuRow(
-                                        text = text,
-                                        isFirst = index == 0,
-                                        isLast = index == addOptions.lastIndex,
-                                        onClick = {
-                                            showAddMenu = false
-                                            when (index) {
-                                                0 -> {
-                                                    actions.onSetLoginMode(0)
-                                                    mhyDialogMounted = true
-                                                    showMhyDialog = true
-                                                }
-                                                1 -> {
-                                                    actions.onSetWbLoginMode(0)
-                                                    wbDialogMounted = true
-                                                    showWbDialog = true
-                                                }
-                                                else -> {
-                                                    actions.onSetBingLoginMode(0)
-                                                    bingDialogMounted = true
-                                                    showBingDialog = true
-                                                }
-                                            }
-                                        },
-                                    )
-                                }
-                            }
                         }
                     }
                 },
@@ -426,139 +261,36 @@ fun AccountPagerMiuix(
             contentPadding = innerPadding,
             overscrollEffect = null,
         ) {
-            // ==================== 米游社 ====================
-            if (state.mihoyoAccounts.isNotEmpty()) {
-                item { SectionHeader(stringResource(R.string.miyoushe)) }
-                item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column {
-                            state.mihoyoAccounts.forEach { account ->
-                                BasicComponent(
-                                    title = account.nickname,
-                                    summary = "stuid=${account.stuid}",
-                                    startAction = {
-                                        AccountFace(
-                                            url = account.avatarUrl,
-                                            label = account.nickname,
-                                            hydrating = account.id in state.mhyHydratingIds,
-                                        )
-                                    },
-                                    endActions = {
-                                        IconButton(
-                                            onClick = {
-                                                dismissInput()
-                                                actions.onRemoveMihoyo(account.id)
-                                            },
-                                        ) {
-                                            Icon(
-                                                Icons.Rounded.Delete,
-                                                contentDescription = stringResource(R.string.miyoushe_logout),
-                                                tint = colorScheme.onSurfaceVariantSummary,
-                                            )
-                                        }
-                                    },
-                                    onClick = { dismissInput() },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ==================== WorkBuddy ====================
             if (state.wbAccounts.isNotEmpty()) {
+                item {
+                    CreditSummaryCard(
+                        accounts = state.wbAccounts,
+                        credits = state.wbCredits,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
                 item { SectionHeader(stringResource(R.string.workbuddy)) }
                 item {
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column {
                             state.wbAccounts.forEach { account ->
-                                BasicComponent(
-                                    title = account.label,
-                                    summary = wbSummary(account, state.wbCredits[account.id]),
-                                    startAction = {
-                                        AccountFace(
-                                            url = account.avatarUrl,
-                                            label = account.label,
-                                            hydrating = false,
-                                        )
+                                WbAccountRow(
+                                    account = account,
+                                    credit = state.wbCredits[account.id],
+                                    onViewCredits = {
+                                        dismissInput()
+                                        actions.onViewWbCredits(account.id)
                                     },
-                                    endActions = {
-                                        // 查看积分：点开逐笔明细（余额显示在 summary 上）
-                                        IconButton(
-                                            onClick = {
-                                                dismissInput()
-                                                actions.onViewWbCredits(account.id)
-                                            },
-                                        ) {
-                                            Icon(
-                                                Icons.Rounded.Star,
-                                                contentDescription = "查看积分",
-                                                tint = colorScheme.primary,
-                                            )
-                                        }
-                                        IconButton(
-                                            onClick = {
-                                                dismissInput()
-                                                actions.onRemoveWb(account.id)
-                                            },
-                                        ) {
-                                            Icon(
-                                                Icons.Rounded.Delete,
-                                                contentDescription = stringResource(R.string.workbuddy_logout),
-                                                tint = colorScheme.onSurfaceVariantSummary,
-                                            )
-                                        }
+                                    onRemove = {
+                                        dismissInput()
+                                        actions.onRemoveWb(account.id)
                                     },
-                                    onClick = { dismissInput() },
                                 )
                             }
                         }
                     }
                 }
-            }
-
-            // ==================== Bing ====================
-            if (state.bingAccounts.isNotEmpty()) {
-                item { SectionHeader(stringResource(R.string.bing_rewards)) }
-                item {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column {
-                            state.bingAccounts.forEach { account ->
-                                BasicComponent(
-                                    title = account.label,
-                                    summary = bingSummary(account),
-                                    startAction = {
-                                        AccountFace(
-                                            url = "",
-                                            label = account.label,
-                                            hydrating = false,
-                                        )
-                                    },
-                                    endActions = {
-                                        IconButton(
-                                            onClick = {
-                                                dismissInput()
-                                                actions.onRemoveBing(account.id)
-                                            },
-                                        ) {
-                                            Icon(
-                                                Icons.Rounded.Delete,
-                                                contentDescription = stringResource(R.string.bing_logout),
-                                                tint = colorScheme.onSurfaceVariantSummary,
-                                            )
-                                        }
-                                    },
-                                    onClick = { dismissInput() },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (state.mihoyoAccounts.isEmpty() && state.wbAccounts.isEmpty() &&
-                state.bingAccounts.isEmpty()
-            ) {
+            } else {
                 item { EmptyHint() }
             }
 
@@ -568,82 +300,198 @@ fun AccountPagerMiuix(
 }
 
 /**
- * 「添加账号」菜单的一行。样式对齐 miuix DropdownImpl 的弹出态，
- * 但不带尾部选中勾，因此文字后面不会多出一段为勾留的空白。
+ * 顶部积分汇总：总剩余可用积分 + 3 日内 / 5 日内到期可用积分。
+ *
+ * 「到期」只统计**还没过期**的额度——已经过期的余额既不可用，也不该出现在"即将到期"里。
+ * 查询失败 / 缺 uid 的账号不参与求和，但会在底部用小字说明有几个没统计进去，
+ * 免得用户以为数字涵盖了全部账号。
  */
 @Composable
-private fun AddMenuRow(
-    text: String,
-    isFirst: Boolean,
-    isLast: Boolean,
-    onClick: () -> Unit,
+private fun CreditSummaryCard(
+    accounts: List<AccountRepository.WorkBuddyAccount>,
+    credits: Map<String, WbCreditState>,
+    modifier: Modifier = Modifier,
 ) {
-    val verticalPadding = if (isFirst || isLast) {
-        DropdownDefaults.FirstLastVerticalPadding
-    } else {
-        DropdownDefaults.MiddleVerticalPadding
+    val summary = remember(accounts, credits) {
+        CreditStats.summarize(accounts, credits, System.currentTimeMillis())
     }
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = DropdownDefaults.MinHeight)
-            .clickable(onClick = onClick)
-            .padding(
-                start = DropdownDefaults.InsideHorizontalPadding,
-                end = DropdownDefaults.InsideHorizontalPadding,
-                top = verticalPadding,
-                bottom = verticalPadding,
-            ),
-        contentAlignment = Alignment.CenterStart,
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp, 14.dp)) {
+            Text(
+                text = "总剩余可用积分",
+                fontSize = 12.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = WorkBuddyCredits.format(summary.remaining),
+                fontSize = 30.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                ExpiryStat(
+                    label = "3 日内到期",
+                    value = summary.expiringIn3Days,
+                    emphasize = true,
+                    modifier = Modifier.weight(1f),
+                )
+                ExpiryStat(
+                    label = "5 日内到期",
+                    value = summary.expiringIn5Days,
+                    emphasize = false,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            val notes = buildList {
+                if (summary.loading > 0) add("${summary.loading} 个账号查询中")
+                if (summary.failed > 0) add("${summary.failed} 个账号查询失败")
+                if (summary.skipped > 0) add("${summary.skipped} 个账号缺 uid 未统计")
+            }
+            if (notes.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = notes.joinToString(" · "),
+                    fontSize = 11.sp,
+                    color = colorScheme.onSurfaceVariantSummary,
+                )
+            }
+        }
+    }
+}
+
+/** 汇总卡里的一个到期额度小块 */
+@Composable
+private fun ExpiryStat(
+    label: String,
+    value: Double,
+    emphasize: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(colorScheme.surfaceContainer)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
     ) {
         Text(
-            text = text,
-            fontSize = MiuixTheme.textStyles.body1.fontSize,
+            text = label,
+            fontSize = 10.sp,
+            color = colorScheme.onSurfaceVariantSummary,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = WorkBuddyCredits.format(value),
+            fontSize = 16.sp,
             fontWeight = FontWeight.Medium,
-            color = colorScheme.onSurfaceContainer,
+            color = if (emphasize && value > 0) colorScheme.primary else colorScheme.onSurface,
         )
     }
 }
 
 /**
- * Bing 账号的副标题：上次同步到的积分快照 + 地区。
- * 积分是执行时顺手记下来的只读快照，不额外发请求。
- */
-@Composable
-private fun bingSummary(account: com.functy.fewards.data.repository.AccountRepository.BingAccount): String {
-    if (account.lastBalance < 0) return stringResource(R.string.bing_balance_unknown)
-    val balance = stringResource(R.string.bing_balance, account.lastBalance)
-    return if (account.country.isNotEmpty()) balance + " · " + account.country else balance
-}
-
-/**
- * WorkBuddy 账号的副标题：uid / token 指纹 + 积分余额。
+ * 一行 WorkBuddy 账号：头像 / 名称 + 剩余积分 + uid + 3、5 日内到期 + 两个按钮。
  *
- * 积分查询失败时明写「积分查询失败」，不显示 0——0 会被当成"真的没积分了"。
- * 缺 uid 的账号（手动粘 token 导入）查不了积分，单独提示而不是一直转圈。
+ * 不用 BasicComponent：那里只有单行 summary，塞不下"剩余 + 两个到期窗口"。
+ * 行高与左右留白按 BasicComponent 的口径（横向 16dp / 纵向 10dp）对齐，
+ * 混在同一张卡片里看不出差异。
  */
 @Composable
-private fun wbSummary(
-    account: com.functy.fewards.data.repository.AccountRepository.WorkBuddyAccount,
+private fun WbAccountRow(
+    account: AccountRepository.WorkBuddyAccount,
     credit: WbCreditState?,
-): String {
-    val base = if (account.uid.isNotEmpty()) {
-        "uid=${account.uid}"
-    } else {
-        "token=${account.token.take(6)}****"
+    onViewCredits: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val balance = credit?.balance
+    val now = remember(credit) { System.currentTimeMillis() }
+    val threeDays = CreditStats.expiringWithin(balance, 3, now)
+    val fiveDays = CreditStats.expiringWithin(balance, 5, now)
+
+    val remainingText = when {
+        balance != null -> "剩余 " + WorkBuddyCredits.format(balance.remaining)
+        credit?.loading == true -> "查询中…"
+        credit?.error?.isNotEmpty() == true -> "查询失败"
+        account.uid.isEmpty() -> "缺 uid"
+        else -> "待查询"
     }
-    val detail = when {
-        credit?.balance != null ->
-            "剩余 " + com.functy.fewards.core.workbuddy.WorkBuddyCredits.format(credit.balance.remaining) + " 积分"
-        credit?.loading == true -> "积分查询中…"
-        credit?.error?.isNotEmpty() == true -> "积分查询失败"
-        account.uid.isEmpty() -> "积分不可查（缺 uid）"
-        else -> "积分待查询"
+    val expiryText = when {
+        balance != null ->
+            "3 日内 " + WorkBuddyCredits.format(threeDays) + " · 5 日内 " + WorkBuddyCredits.format(fiveDays)
+        credit?.error?.isNotEmpty() == true -> "3 日内 — · 5 日内 —"
+        account.uid.isEmpty() -> "该账号缺少 uid，无法查询积分"
+        else -> "正在查询积分…"
     }
-    return "$base · $detail"
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AccountFace(
+            url = account.avatarUrl,
+            label = account.label,
+            hydrating = false,
+        )
+        Spacer(Modifier.size(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = account.label,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    text = remainingText,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (balance != null) colorScheme.primary else colorScheme.onSurfaceVariantSummary,
+                    maxLines = 1,
+                )
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = if (account.uid.isNotEmpty()) "uid=${account.uid}" else "token=${account.token.take(6)}****",
+                fontSize = 11.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(1.dp))
+            Text(
+                text = expiryText,
+                fontSize = 11.sp,
+                color = colorScheme.onSurfaceVariantSummary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // 查看积分：点开逐笔明细（剩余与 3/5 日额度已经显示在行内）
+        IconButton(onClick = onViewCredits) {
+            Icon(
+                Icons.Rounded.Star,
+                contentDescription = "查看积分",
+                tint = colorScheme.primary,
+            )
+        }
+        IconButton(onClick = onRemove) {
+            Icon(
+                Icons.Rounded.Delete,
+                contentDescription = stringResource(R.string.workbuddy_logout),
+                tint = colorScheme.onSurfaceVariantSummary,
+            )
+        }
+    }
 }
 
-/** 灰色小标题：区分米游社 / WorkBuddy / Bing 账号分组。 */
+/** 灰色小标题 */
 @Composable
 private fun SectionHeader(text: String) {
     Text(

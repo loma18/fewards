@@ -19,17 +19,6 @@ interface SettingsRepository {
     var overviewAutoDismiss: Boolean
     var overviewHoldSeconds: Float
 
-    // 米游社
-    var mhyMasterEnabled: Boolean
-    var mhyGameSign: Boolean
-    var mhyBbsSign: Boolean
-    var mhyRead: Boolean
-    var mhyLike: Boolean
-    var mhyCancelLike: Boolean
-    var mhyShare: Boolean
-    var mhyCaptchaPolicy: Int // 0 = 跳过并记录；1 = 打码接口
-    var mhyCaptchaApiUrl: String
-
     // WorkBuddy
     var wbMasterEnabled: Boolean
     /** 每日签到后自动跑成长中心（旅行 / 任务 / 补登 / 兑换 / 盲盒）；默认开启 */
@@ -44,9 +33,4 @@ interface SettingsRepository {
     var wbSyncForcePush: Boolean
     /** 上次成功同步的时间（毫秒），仅用于界面展示 */
     var wbSyncLastAt: Long
-
-    // Bing
-    var bingMasterEnabled: Boolean
-    /** 是否同时领取 Bing App 每日连签（dapi type 103，15 分/天）。 */
-    var bingAppCheckIn: Boolean
 }

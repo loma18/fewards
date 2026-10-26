@@ -45,7 +45,7 @@ class ConfigTransferViewModel : ViewModel() {
             }
             val result = transfer.import(text)
             _status.value = buildString {
-                append("导入完成：米游社 ${result.mihoyo} 个，WorkBuddy ${result.workbuddy} 个")
+                append("导入完成：WorkBuddy ${result.workbuddy} 个")
                 result.errors.forEach { append("；$it") }
             }
         }
@@ -60,7 +60,7 @@ class ConfigTransferViewModel : ViewModel() {
             }
             val result = transfer.import(text)
             _status.value = buildString {
-                append("导入完成：米游社 ${result.mihoyo} 个，WorkBuddy ${result.workbuddy} 个")
+                append("导入完成：WorkBuddy ${result.workbuddy} 个")
                 result.errors.forEach { append("；$it") }
             }
         }

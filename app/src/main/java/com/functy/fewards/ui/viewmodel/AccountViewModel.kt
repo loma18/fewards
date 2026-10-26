@@ -3,12 +3,6 @@ package com.functy.fewards.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.functy.fewards.core.AppLog
-import com.functy.fewards.core.bing.BingConstants
-import com.functy.fewards.core.bing.BingEngine
-import com.functy.fewards.core.bing.BingIdentity
-import com.functy.fewards.core.bing.BingOAuth
-import com.functy.fewards.core.mihoyo.MihoyoApi
-import com.functy.fewards.core.mihoyo.MihoyoProfileHydrator
 import com.functy.fewards.core.workbuddy.WorkBuddyCredits
 import com.functy.fewards.core.workbuddy.WorkBuddyLabel
 import com.functy.fewards.core.workbuddy.WorkBuddyLogin
@@ -27,24 +21,21 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * 账号页 ViewModel：米游社扫码 / Cookie 登录，WorkBuddy 扫码 / Token 登录，
- * Bing 内嵌 WebView 授权 / refresh_token 登录。
- * 三套流程状态机一致（QrState），只是协议客户端不同。
+ * 账号页 ViewModel：WorkBuddy 扫码 / Token 登录，以及各账号的积分查询。
+ *
+ * 米游社与 Bing 已于本次改造中移除，只剩 WorkBuddy 一套登录流程
+ * （QrState 状态机保留，扫码阶段语义不变）。
  */
 class AccountViewModel : ViewModel() {
 
     private val accounts = AccountRepository()
-    private val api = MihoyoApi(MihoyoApi.defaultClient())
     private val wbLogin = WorkBuddyLogin(fewardsApp.okhttpClient)
-    private val bingOAuth = BingOAuth(fewardsApp.okhttpClient)
     private val credits = WorkBuddyCredits(fewardsApp.okhttpClient)
 
     private val _uiState = MutableStateFlow(AccountUiState())
     val uiState: StateFlow<AccountUiState> = _uiState.asStateFlow()
 
-    private var qrJob: Job? = null
     private var wbQrJob: Job? = null
-    private var bingJob: Job? = null
     private var creditJob: Job? = null
     private var creditDetailJob: Job? = null
 
@@ -59,136 +50,13 @@ class AccountViewModel : ViewModel() {
     }
 
     fun refresh() {
-        repairBingLabels()
         publishAccounts()
-        hydrateMissingProfiles()
         syncWbCredits()
     }
 
-    /**
-     * 修正老的 Bing 占位标签。
-     * 标签在纳管时写死，改名之后已有账号不会自己更新，所以在读取侧就地改一次。
-     */
-    private fun repairBingLabels() {
-        accounts.bingAccounts().forEach { account ->
-            val fixed = BingIdentity.normalizeLabel(account.label)
-            if (fixed != account.label) accounts.addBingAccount(account.copy(label = fixed))
-        }
-    }
-
     private fun publishAccounts() {
-        val mhy = accounts.mihoyoAccounts()
         val wb = accounts.workBuddyAccounts()
-        val bing = accounts.bingAccounts()
-        _uiState.update { it.copy(mihoyoAccounts = mhy, wbAccounts = wb, bingAccounts = bing) }
-    }
-
-    private fun hydrateMissingProfiles() {
-        accounts.mihoyoAccounts()
-            .filter { MihoyoProfileHydrator.needsHydration(it) }
-            .forEach { acc ->
-                if (!MihoyoProfileHydrator.markAttempted(acc.id)) return@forEach
-                _uiState.update { it.copy(mhyHydratingIds = it.mhyHydratingIds + acc.id) }
-                viewModelScope.launch {
-                    try {
-                        val next = MihoyoProfileHydrator.hydrate(api, acc)
-                        if (next != acc) accounts.addMihoyoAccount(next)
-                    } finally {
-                        _uiState.update { it.copy(mhyHydratingIds = it.mhyHydratingIds - acc.id) }
-                        publishAccounts()
-                    }
-                }
-            }
-    }
-
-    fun setLoginMode(mode: Int) {
-        _uiState.update { it.copy(loginMode = mode) }
-    }
-
-    // ==================== 米游社扫码 ====================
-
-    /** 生成二维码并轮询扫码状态。 */
-    fun startQrLogin() {
-        qrJob?.cancel()
-        _uiState.update { it.copy(qrState = QrState.Loading) }
-        qrJob = viewModelScope.launch {
-            try {
-                val session = api.createQrLogin()
-                _uiState.update { it.copy(qrState = QrState.Waiting, qrContent = session.url) }
-                val result = api.awaitQrLogin(session) { status ->
-                    when (status) {
-                        is MihoyoApi.QrStatus.Scanned ->
-                            _uiState.update { s -> s.copy(qrState = QrState.Scanned) }
-                        else -> {}
-                    }
-                }
-                val account = AccountRepository.MihoyoAccount(
-                    id = "mhy_${result.mid}",
-                    nickname = result.nickname,
-                    stoken = result.stoken,
-                    stuid = result.stuid,
-                    mid = result.mid,
-                    cookie = "account_id=${result.stuid}; account_id_v2=${result.stuid}; account_mid_v2=${result.mid}; ltoken=; luid=${result.stuid}; ltmid_v2=${result.mid}; stuid=${result.stuid}; stoken=${result.stoken}; mid=${result.mid}",
-                )
-                // 验证 stoken（老接口）
-                val valid = api.validateStoken(account)
-                if (!valid) {
-                    AppLog.w("MHY", "stoken 验证失败，仍已保存（可能需要稍后重试）")
-                }
-                accounts.addMihoyoAccount(account)
-                AppLog.i("MHY", "账号 ${result.nickname} 扫码登录成功")
-                _uiState.update { it.copy(qrState = QrState.Confirmed) }
-                refresh()
-            } catch (c: kotlinx.coroutines.CancellationException) {
-                /**
-                 * 主动取消**不是失败**。
-                 *
-                 * 关弹窗（`onCancelWbQr`）、切 Tab、点「重新获取」都会 cancel 这个 job。
-                 * 而取消是在协程的下一个挂起点（`delay` / 网络请求）抛出的——如果被下面
-                 * 的 catch(Throwable) 接住，就会把刚写入的 Confirmed 覆盖成 Error，
-                 * 弹窗消失动画期间显示成「获取二维码失败」，账号其实已经存进去了。
-                 */
-                throw c
-            } catch (t: Throwable) {
-                AppLog.e("MHY", "扫码登录失败: ${t.message}")
-                _uiState.update {
-                    it.copy(
-                        qrState = if (t.message?.contains("过期") == true)
-                            QrState.Expired else QrState.Error
-                    )
-                }
-            }
-        }
-    }
-
-    fun cancelQr() {
-        qrJob?.cancel()
-        qrJob = null
-        _uiState.update { it.copy(qrState = QrState.Idle) }
-    }
-
-    /** 返回 false 表示 cookie 不可解析，弹窗保留输入让用户改。 */
-    fun importCookie(cookie: String): Boolean {
-        val account = MihoyoApi.parseCookie(cookie.trim())
-        if (account == null) {
-            AppLog.e("MHY", "Cookie 无效：缺少 stoken 或 uid")
-            return false
-        }
-        viewModelScope.launch {
-            val valid = api.validateStoken(account)
-            if (!valid) {
-                AppLog.w("MHY", "stoken 验证未通过，仍已保存")
-            }
-            accounts.addMihoyoAccount(account)
-            AppLog.i("MHY", "账号 ${account.nickname} Cookie 导入成功")
-            refresh()
-        }
-        return true
-    }
-
-    fun removeMihoyo(id: String) {
-        accounts.removeMihoyoAccount(id)
-        refresh()
+        _uiState.update { it.copy(wbAccounts = wb) }
     }
 
     // ==================== WorkBuddy ====================
@@ -295,6 +163,8 @@ class AccountViewModel : ViewModel() {
     fun removeWb(id: String) {
         accounts.removeWorkBuddyAccount(id)
         creditCache.remove(id)
+        // 账号都删了，弹窗不能继续挂着
+        if (_uiState.value.wbCreditDetailId == id) closeWbCredits()
         refresh()
     }
 
@@ -415,184 +285,19 @@ class AccountViewModel : ViewModel() {
         if (withDetail && _uiState.value.wbCreditDetailId == id) viewWbCredits(id)
     }
 
-    // ==================== Bing ====================
-
-    fun setBingLoginMode(mode: Int) {
-        _uiState.update { it.copy(bingLoginMode = mode) }
-    }
-
-    /**
-     * 生成授权页并展示内嵌 WebView。
-     * 这一步不发网络请求：URL 是纯拼接，真正的登录发生在 WebView 里。
-     */
-    fun startBingAuth() {
-        bingJob?.cancel()
-        val csrf = randomState()
-        _uiState.update {
-            it.copy(
-                bingAuthCsrf = csrf,
-                bingAuthUrl = BingOAuth.authorizeUrl(csrf),
-                bingAuthPhase = QrState.Waiting,
-            )
-        }
-    }
-
-    fun cancelBingAuth() {
-        bingJob?.cancel()
-        bingJob = null
-        _uiState.update {
-            it.copy(bingAuthPhase = QrState.Idle, bingAuthUrl = "", bingAuthCsrf = "")
-        }
-    }
-
-    /**
-     * WebView 拦到授权回跳：校验 state -> 用授权码换 token -> 落库。
-     * 返回 true 表示这个回跳已经被消费（WebView 不该再加载它）。
-     */
-    fun handleBingRedirect(url: String): Boolean {
-        if (!BingOAuth.isRedirect(url)) return false
-
-        BingOAuth.extractError(url)?.let { error ->
-            AppLog.e("BING", "授权被拒绝：" + error)
-            _uiState.update { it.copy(bingAuthPhase = QrState.Error) }
-            return true
-        }
-
-        val code = BingOAuth.extractCode(url) ?: return false
-        val expected = _uiState.value.bingAuthCsrf
-        if (expected.isNotEmpty() && BingOAuth.extractState(url) != expected) {
-            AppLog.e("BING", "授权回跳 state 不匹配，已忽略")
-            _uiState.update { it.copy(bingAuthPhase = QrState.Error) }
-            return true
-        }
-
-        bingJob?.cancel()
-        bingJob = viewModelScope.launch {
-            _uiState.update { it.copy(bingAuthPhase = QrState.Loading) }
-            val token = bingOAuth.exchangeCode(code)
-            if (token == null) {
-                AppLog.e("BING", "授权码换 token 失败，请重新登录")
-                _uiState.update { it.copy(bingAuthPhase = QrState.Error) }
-                return@launch
-            }
-            if (token.refreshToken.isEmpty()) {
-                // 没有 refresh_token 就撑不过一小时，宁可当场报错让用户重试
-                AppLog.e("BING", "微软未返回 refresh_token，无法长期免登录")
-                _uiState.update { it.copy(bingAuthPhase = QrState.Error) }
-                return@launch
-            }
-            persistBing(
-                refreshToken = token.refreshToken,
-                fallbackAccessToken = token.accessToken,
-                fallbackExpiresIn = token.expiresInSeconds,
-            )
-            _uiState.update { it.copy(bingAuthPhase = QrState.Confirmed) }
-            publishAccounts()
-        }
-        return true
-    }
-
-    /**
-     * 粘贴 refresh_token 导入。
-     * 返回 false 表示格式不可接受，弹窗保留输入让用户改。
-     */
-    fun importBingToken(raw: String): Boolean {
-        val token = raw.trim()
-        if (token.length < MIN_BING_REFRESH_TOKEN_LENGTH || token.any { it.isWhitespace() }) {
-            AppLog.e("BING", "refresh_token 格式不正确（长度不足或含空白字符）")
-            return false
-        }
-        viewModelScope.launch {
-            persistBing(refreshToken = token, fallbackAccessToken = "", fallbackExpiresIn = 0L)
-            publishAccounts()
-        }
-        return true
-    }
-
-    fun removeBing(id: String) {
-        accounts.removeBingAccount(id)
-        refresh()
-    }
-
-    /**
-     * 落库一个 Bing 账号。
-     *
-     * 先用 refresh_token 探一次（顺带拿到地区 / 余额 / 昵称）；探测失败也照样存下来，
-     * 与米游社 cookie 导入一致：导入即纳管，可用性由下次执行时的日志给出。
-     */
-    private suspend fun persistBing(
-        refreshToken: String,
-        fallbackAccessToken: String,
-        fallbackExpiresIn: Long,
-    ) {
-        if (refreshToken.isEmpty() && fallbackAccessToken.isEmpty()) {
-            AppLog.e("BING", "没有可用的凭据，未保存")
-            return
-        }
-        val probe = refreshToken.takeIf { it.isNotEmpty() }?.let {
-            BingEngine.probe(
-                client = fewardsApp.okhttpClient,
-                oauth = bingOAuth,
-                refreshToken = it,
-                country = BingConstants.DEFAULT_COUNTRY,
-            )
-        }
-        val finalRefresh = probe?.refreshToken?.takeIf { it.isNotEmpty() } ?: refreshToken
-        val id = BingIdentity.accountId(finalRefresh)
-        val existed = accounts.bingAccounts().any { it.id == id }
-        accounts.addBingAccount(
-            AccountRepository.BingAccount(
-                id = id,
-                label = probe?.displayName?.takeIf { it.isNotEmpty() }
-                    ?: BingIdentity.fallbackLabel(finalRefresh),
-                refreshToken = finalRefresh,
-                accessToken = probe?.accessToken ?: fallbackAccessToken,
-                expiresAt = probe?.expiresAt
-                    ?: (System.currentTimeMillis() / 1000 + fallbackExpiresIn),
-                country = probe?.country ?: BingConstants.DEFAULT_COUNTRY,
-                lastBalance = probe?.balance ?: -1,
-            )
-        )
-        AppLog.i("BING", if (existed) "Bing 账号已更新" else "Bing 账号已添加")
-        if (probe == null) {
-            AppLog.w("BING", "未能验证该账号（网络或授权问题），已先保存；执行时会再试一次")
-        }
-    }
-
-    /** 一次性 CSRF state。 */
-    private fun randomState(): String {
-        val bytes = ByteArray(16)
-        java.security.SecureRandom().nextBytes(bytes)
-        return bytes.joinToString("") { "%02x".format(it) }
-    }
-
     private companion object {
-        /** refresh_token 是长串不透明凭据；明显过短 / 带空白的一律当格式错误。 */
-        const val MIN_BING_REFRESH_TOKEN_LENGTH = 20
-
         /** 积分余额缓存时长，与 b 端 `BALANCE_CACHE_TTL_MS` 一致 */
         const val CREDIT_CACHE_TTL_MS = 2 * 60 * 1000L
     }
 
     val accountActions = AccountActions(
-        onSetLoginMode = ::setLoginMode,
-        onStartQr = ::startQrLogin,
-        onCancelQr = ::cancelQr,
-        onImportCookie = ::importCookie,
-        onRemoveMihoyo = ::removeMihoyo,
-        onImportWbToken = ::importWbToken,
         onRemoveWb = ::removeWb,
         onSetWbLoginMode = ::setWbLoginMode,
         onStartWbQr = ::startWbQrLogin,
         onCancelWbQr = ::cancelWbQr,
+        onImportWbToken = ::importWbToken,
         onViewWbCredits = ::viewWbCredits,
         onCloseWbCredits = ::closeWbCredits,
         onRefreshWbCredits = { refreshWbCredits(it) },
-        onSetBingLoginMode = ::setBingLoginMode,
-        onStartBingAuth = ::startBingAuth,
-        onCancelBingAuth = ::cancelBingAuth,
-        onBingRedirect = ::handleBingRedirect,
-        onImportBingToken = ::importBingToken,
-        onRemoveBing = ::removeBing,
     )
 }

@@ -11,7 +11,7 @@ import com.functy.fewards.data.repository.SettingsRepositoryImpl
 import com.functy.fewards.ui.viewmodel.TaskRunner
 
 /**
- * 控制中心 / 快捷设置磁贴：点击后开启并执行与首页「开始执行」相同的勾选任务（默认双开）。
+ * 控制中心 / 快捷设置磁贴：点击后执行与首页「开始执行」相同的任务（当前只有 WorkBuddy）。
  * 执行中保持 STATE_ACTIVE，结束后回到 STATE_INACTIVE。执行中再点不取消。
  */
 class RunTasksTileService : TileService() {
@@ -29,16 +29,14 @@ class RunTasksTileService : TileService() {
             val accounts = AccountRepository()
             val settings = SettingsRepositoryImpl()
             val runWb = settings.wbMasterEnabled && accounts.workBuddyConfigured()
-            val runMhy = settings.mhyMasterEnabled && accounts.mihoyoConfigured()
-            val runBing = settings.bingMasterEnabled && accounts.bingConfigured()
-            if (!runWb && !runMhy && !runBing) {
-                AppLog.w("SYS", "控制中心签到：没有可执行的已配置任务")
+            if (!runWb) {
+                AppLog.w("SYS", "控制中心签到：WorkBuddy 未开启或没有账号")
                 applyState(false)
             } else {
                 applyState(true)
                 TaskNotifier.startRun(getString(R.string.notify_running))
-                AppLog.i("SYS", "控制中心开始执行：WorkBuddy=$runWb 米游社=$runMhy Bing=$runBing")
-                TaskWorker.enqueue(applicationContext, runWb, runMhy, runBing)
+                AppLog.i("SYS", "控制中心开始执行：WorkBuddy=true")
+                TaskWorker.enqueue(applicationContext, runWb)
             }
         }
         if (isLocked) {

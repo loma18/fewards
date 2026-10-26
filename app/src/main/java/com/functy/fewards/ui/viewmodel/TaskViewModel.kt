@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 
 /**
  * 主页任务卡 ViewModel：勾选状态 + 状态卡刷新 + 触发执行。
+ * 现在只有 WorkBuddy 一个任务；米游社与 Bing 已移除。
  */
 class TaskViewModel : ViewModel() {
 
@@ -38,11 +39,7 @@ class TaskViewModel : ViewModel() {
                 _uiState.update {
                     it.copy(
                         wbStatus = runner.wbStatus,
-                        mhyStatus = runner.mhyStatus,
-                        bingStatus = runner.bingStatus,
                         wbRunning = runner.wbRunning,
-                        mhyRunning = runner.mhyRunning,
-                        bingRunning = runner.bingRunning,
                         running = runner.running,
                         lastRunSummary = runner.lastRunSummary,
                     )
@@ -60,28 +57,12 @@ class TaskViewModel : ViewModel() {
                 } else {
                     resolveStatus(accounts.workBuddyConfigured(), accounts.isDoneToday("wb"))
                 },
-                bingStatus = if (runner.bingRunning) {
-                    runner.bingStatus
-                } else {
-                    resolveStatus(accounts.bingConfigured(), accounts.isDoneToday("bing"))
-                },
-                mhyStatus = if (runner.mhyRunning) {
-                    runner.mhyStatus
-                } else {
-                    resolveStatus(accounts.mihoyoConfigured(), accounts.isDoneToday("mhy"))
-                },
                 wbRunning = runner.wbRunning,
-                mhyRunning = runner.mhyRunning,
-                bingRunning = runner.bingRunning,
                 running = runner.running,
                 lastRunSummary = runner.lastRunSummary,
                 wbChecked = it.wbChecked,
-                mhyChecked = it.mhyChecked,
-                bingChecked = it.bingChecked,
                 // 总开关：关掉的任务首页整行不出现（见 HomeUiState.summary()）
                 wbEnabled = repo.wbMasterEnabled,
-                mhyEnabled = repo.mhyMasterEnabled,
-                bingEnabled = repo.bingMasterEnabled,
             )
         }
     }
@@ -96,22 +77,12 @@ class TaskViewModel : ViewModel() {
         _uiState.update { it.copy(wbChecked = checked) }
     }
 
-    fun toggleMhy(checked: Boolean) {
-        _uiState.update { it.copy(mhyChecked = checked) }
-    }
-
-    fun toggleBing(checked: Boolean) {
-        _uiState.update { it.copy(bingChecked = checked) }
-    }
-
     val homeActions = HomeActions(
-        onRun = { runWb, runMhy, runBing ->
+        onRun = { runWb ->
             TaskNotifier.startRun("正在执行…")
-            AppLog.i("SYS", "开始执行：WorkBuddy=$runWb 米游社=$runMhy Bing=$runBing")
-            TaskWorker.enqueue(fewardsApp, runWb, runMhy, runBing)
+            AppLog.i("SYS", "开始执行：WorkBuddy=$runWb")
+            TaskWorker.enqueue(fewardsApp, runWb)
         },
         onToggleWb = ::toggleWb,
-        onToggleMhy = ::toggleMhy,
-        onToggleBing = ::toggleBing,
     )
 }

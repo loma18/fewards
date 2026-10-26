@@ -1,24 +1,17 @@
 package com.functy.fewards.data.repository
 
-import com.functy.fewards.core.mihoyo.MihoyoApi
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 纯解析：不碰 SharedPreferences。裸 cookie 不再要求先过 JSONObject。
+ * 纯解析：不碰 SharedPreferences。
+ *
+ * 只认 WorkBuddy。米游社与 Bing 的功能已移除，旧备份里的 `mihoyos` / `bings`
+ * 会被忽略（并在结果里提示一句），这样用户拿旧文件导入不会以为"丢数据了"。
  */
 object ConfigTransferParser {
     const val FORMAT = "fewards-config"
     const val VERSION = 1
-
-    data class MihoyoDraft(
-        val id: String,
-        val nickname: String,
-        val stoken: String,
-        val stuid: String,
-        val mid: String,
-        val cookie: String,
-    )
 
     data class WorkBuddyDraft(
         val id: String,
@@ -30,21 +23,10 @@ object ConfigTransferParser {
         val expiresAt: Long = 0L,
     )
 
-    /**
-     * Bing 只导出 refresh_token —— access_token 是几小时就过期的缓存，
-     * 导出它没有意义；refresh_token 才是「换个设备也能继续用」的那份凭据。
-     */
-    data class BingDraft(
-        val id: String,
-        val label: String,
-        val refreshToken: String,
-        val country: String = "",
-    )
-
     data class Parsed(
-        val mihoyos: List<MihoyoDraft> = emptyList(),
         val workbuddies: List<WorkBuddyDraft> = emptyList(),
-        val bings: List<BingDraft> = emptyList(),
+        /** 旧配置里被忽略的账号数（米游社 + Bing），仅用于提示 */
+        val ignoredLegacy: Int = 0,
         val errors: List<String> = emptyList(),
         val recognized: Boolean = true,
     )
@@ -61,61 +43,27 @@ object ConfigTransferParser {
 
     private fun parseJsonObject(root: JSONObject, original: String): Parsed {
         if (root.optString("_format") == FORMAT) return parseBundle(root)
-        if (original.contains("stoken") && original.contains("=")) return parseBareCookie(original)
         if (original.trim().startsWith("eyJ")) return parseBareJwt(original)
+        // 旧版导出过裸 Cookie（米游社），现在没有对应功能了，给一句能看懂的提示
+        if (original.contains("stoken") && original.contains("=")) {
+            return Parsed(errors = listOf("这是米游社 Cookie，相关功能已移除"), recognized = false)
+        }
         return Parsed(errors = listOf("无法识别的配置格式"), recognized = false)
     }
 
     private fun fallbackPlain(text: String, jsonError: String?): Parsed {
-        if (text.contains("stoken") && text.contains("=")) return parseBareCookie(text)
         if (text.startsWith("eyJ")) return parseBareJwt(text)
+        if (text.contains("stoken") && text.contains("=")) {
+            return Parsed(errors = listOf("这是米游社 Cookie，相关功能已移除"), recognized = false)
+        }
         val reason = jsonError?.let { "解析失败: $it" } ?: "无法识别的配置格式"
         return Parsed(errors = listOf(reason), recognized = false)
     }
 
     private fun parseBundle(root: JSONObject): Parsed {
         val errors = mutableListOf<String>()
-        val mihoyos = mutableListOf<MihoyoDraft>()
         val workbuddies = mutableListOf<WorkBuddyDraft>()
-        val mhyArr = root.optJSONArray("mihoyos") ?: JSONArray()
-        for (i in 0 until mhyArr.length()) {
-            val o = mhyArr.getJSONObject(i)
-            val stoken = o.optString("stoken")
-            val stuid = o.optString("stuid")
-            if (stoken.isEmpty() || stuid.isEmpty()) {
-                errors.add("米游社账号 #$i 缺少 stoken/stuid，跳过")
-                continue
-            }
-            val mid = o.optString("mid")
-            mihoyos.add(
-                MihoyoDraft(
-                    id = o.optString("id").ifEmpty { "mhy_" + mid.ifEmpty { i.toString() } },
-                    nickname = o.optString("nickname").ifEmpty { "账号$stuid" },
-                    stoken = stoken,
-                    stuid = stuid,
-                    mid = mid,
-                    cookie = o.optString("cookie"),
-                )
-            )
-        }
-        val bingArr = root.optJSONArray("bings") ?: JSONArray()
-        val bings = mutableListOf<BingDraft>()
-        for (i in 0 until bingArr.length()) {
-            val o = bingArr.getJSONObject(i)
-            val refreshToken = o.optString("refreshToken")
-            if (refreshToken.isEmpty()) {
-                errors.add("Bing 账号 #$i 缺少 refreshToken，跳过")
-                continue
-            }
-            bings.add(
-                BingDraft(
-                    id = o.optString("id").ifEmpty { "bing_$i" },
-                    label = o.optString("label").ifEmpty { "Bing 账号" },
-                    refreshToken = refreshToken,
-                    country = o.optString("country"),
-                )
-            )
-        }
+
         val wbArr = root.optJSONArray("workbuddies") ?: JSONArray()
         for (i in 0 until wbArr.length()) {
             val o = wbArr.getJSONObject(i)
@@ -136,31 +84,13 @@ object ConfigTransferParser {
                 )
             )
         }
-        return Parsed(
-            mihoyos = mihoyos,
-            workbuddies = workbuddies,
-            bings = bings,
-            errors = errors,
-        )
-    }
 
-    private fun parseBareCookie(text: String): Parsed {
-        val account = MihoyoApi.parseCookie(text)
-        if (account == null) {
-            return Parsed(errors = listOf("无法识别的 Cookie 内容"), recognized = false)
+        val legacy = (root.optJSONArray("mihoyos")?.length() ?: 0) +
+            (root.optJSONArray("bings")?.length() ?: 0)
+        if (legacy > 0) {
+            errors.add("已忽略旧配置里的 $legacy 个米游社 / Bing 账号（相关功能已移除）")
         }
-        return Parsed(
-            mihoyos = listOf(
-                MihoyoDraft(
-                    id = account.id,
-                    nickname = account.nickname,
-                    stoken = account.stoken,
-                    stuid = account.stuid,
-                    mid = account.mid,
-                    cookie = account.cookie,
-                )
-            )
-        )
+        return Parsed(workbuddies = workbuddies, ignoredLegacy = legacy, errors = errors)
     }
 
     private fun parseBareJwt(text: String): Parsed {
