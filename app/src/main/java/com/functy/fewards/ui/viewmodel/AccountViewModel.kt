@@ -61,9 +61,17 @@ class AccountViewModel : ViewModel() {
         }
     }
 
-    fun refresh() {
+    /**
+     * 重读账号库并查询积分。
+     *
+     * @param force true = **绕过 2 分钟缓存**，把每个账号的余额都重新问一遍官方接口。
+     *   只给账号页右上角的刷新按钮用：那是用户「我要看最新数字」的显式意图，
+     *   如果还走缓存（2 分钟内几乎必中），点下去界面上一个数字都不会变，看起来就是没反应。
+     *   切页 / 加号 / 删号这类自动触发保持 false，靠缓存避免每次进页面都打一串官方接口。
+     */
+    fun refresh(force: Boolean = false) {
         publishAccounts()
-        syncWbCredits()
+        syncWbCredits(force)
     }
 
     private fun publishAccounts() {
@@ -211,6 +219,13 @@ class AccountViewModel : ViewModel() {
     fun removeWb(id: String) {
         accounts.removeWorkBuddyAccount(id)
         creditCache.remove(id)
+        /**
+         * 状态里也要抹掉这条。
+         *
+         * 只从库里删、留着 [AccountUiState.wbCredits] 里的条目，会留下一个 `loading = true`
+         * 的孤儿键：顶部的「刷新中」按它判断，就再也转不完；汇总卡也会把它算进"查询中"。
+         */
+        _uiState.update { s -> s.copy(wbCredits = s.wbCredits - id) }
         // 账号都删了，弹窗不能继续挂着
         if (_uiState.value.wbCreditDetailId == id) closeWbCredits()
         refresh()
@@ -233,6 +248,25 @@ class AccountViewModel : ViewModel() {
         if (list.isEmpty()) return
 
         val now = System.currentTimeMillis()
+
+        /**
+         * 正在全量刷新时忽略重复的强刷请求。
+         *
+         * 强刷会 cancel 当前队列再从头开始；用户连点几下就等于让队列永远跑不完第 1 个账号。
+         * 判据是"所有可查账号都已经是 loading"，此时这次点击没有任何新增信息可拿。
+         */
+        if (force && list.all { _uiState.value.wbCredits[it.id]?.loading == true }) return
+
+        /**
+         * 强刷先把缓存整份丢掉。
+         *
+         * 不清的话会有两处把旧值带回来：下面的 `seeded` 会把旧余额铺回状态；
+         * 某个账号这轮查询失败时（失败不写缓存）[creditCache] 里还留着上一次的余额，
+         * 下一次非强刷又会把它当成"有结果"重新铺上去。用户点刷新要的是真值，
+         * 拿不到就显示"查询失败"，不能用旧数字冒充。
+         */
+        if (force) creditCache.clear()
+
         // 先把手里的缓存铺进状态，避免每次进页面都从空白闪一下
         val seeded = list.mapNotNull { acc ->
             creditCache[acc.id]?.let { acc.id to WbCreditState(balance = it.second) }
@@ -250,8 +284,27 @@ class AccountViewModel : ViewModel() {
         if (force) {
             creditQueue.clear()
             creditJob?.cancel()
+            creditJob = null
         }
-        creditQueue += targets.map { it.id }
+        val targetIds = targets.map { it.id }
+
+        /**
+         * 把「刷新中」一次性铺到**所有**待查账号，而不是等队列轮到它才置位。
+         *
+         * 队列是串行的（官方接口较慢，并发会互相拖累），一个有 5 个账号的用户点刷新后
+         * 只有第 1 行会变，后面 4 行毫无动静——这正是"点了刷新像没刷新"的观感来源。
+         * 保留 [WbCreditState.balance]：刷新期间汇总卡继续显示上一份总额，拿到结果再替换。
+         */
+        _uiState.update { s ->
+            val next = s.wbCredits.toMutableMap()
+            for (id in targetIds) {
+                val prev = next[id] ?: WbCreditState()
+                next[id] = prev.copy(loading = true, error = "")
+            }
+            s.copy(wbCredits = next)
+        }
+
+        creditQueue += targetIds
         if (creditJob?.isActive == true) return
 
         creditJob = viewModelScope.launch {
@@ -259,7 +312,12 @@ class AccountViewModel : ViewModel() {
                 val id = creditQueue.first()
                 creditQueue.remove(id)
                 // 每轮重新读盘：上一个账号的刷新可能顺带改了列表
-                val acc = accounts.workBuddyAccounts().firstOrNull { it.id == id } ?: continue
+                val acc = accounts.workBuddyAccounts().firstOrNull { it.id == id }
+                if (acc == null) {
+                    // 排队期间被删掉了：把状态一起抹掉，别留下永远 loading 的孤儿键
+                    _uiState.update { s -> s.copy(wbCredits = s.wbCredits - id) }
+                    continue
+                }
                 _uiState.update { s ->
                     val prev = s.wbCredits[id] ?: WbCreditState()
                     s.copy(wbCredits = s.wbCredits + (id to prev.copy(loading = true, error = "")))

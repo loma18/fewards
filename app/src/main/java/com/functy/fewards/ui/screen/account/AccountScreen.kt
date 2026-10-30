@@ -28,6 +28,13 @@ fun AccountPager(
     AccountPagerMiuix(
         accountViewModel = accountViewModel,
         bottomInnerPadding = bottomInnerPadding,
-        onRefresh = accountViewModel::refresh,
+        /**
+         * 顶部刷新按钮 = **强刷**：绕过 2 分钟缓存，重查每个账号的余额。
+         *
+         * 这里刻意不用 `accountViewModel::refresh`：函数引用无法套用默认参数，
+         * 会退化成 `refresh(force = false)`，也就是切页时那次"命中缓存就不查"的轻量刷新，
+         * 点下去数字不变，用户只会认为按钮坏了。
+         */
+        onRefresh = { accountViewModel.refresh(force = true) },
     )
 }

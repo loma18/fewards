@@ -98,12 +98,22 @@ import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 fun AccountPagerMiuix(
     accountViewModel: AccountViewModel,
     bottomInnerPadding: Dp,
-    /** 手动刷新：重读账号库（设置页同步过来的账号、外部改动的凭据都靠它可见） */
+    /** 手动刷新：重读账号库**并强制重查所有账号的积分**（绕过 2 分钟缓存） */
     onRefresh: () -> Unit = {},
 ) {
     val scrollBehavior = MiuixScrollBehavior()
     val state by accountViewModel.uiState.collectAsStateWithLifecycle()
     val actions = accountViewModel.accountActions
+
+    /**
+     * 是否有**在册**账号正在查积分。
+     *
+     * 只数 [AccountUiState.wbAccounts] 里的账号，不直接扫 `wbCredits`：那张表是只增不减的
+     * 缓存键集合，删号后可能残留 `loading = true` 的孤儿条目，直接扫会让图标永远转下去。
+     */
+    val refreshing = remember(state.wbAccounts, state.wbCredits) {
+        state.wbAccounts.any { state.wbCredits[it.id]?.loading == true }
+    }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val view = LocalView.current
@@ -247,11 +257,21 @@ fun AccountPagerMiuix(
                                 onRefresh()
                             },
                         ) {
-                            Icon(
-                                Icons.Rounded.Refresh,
-                                contentDescription = stringResource(R.string.account_refresh),
-                                tint = colorScheme.onBackground,
-                            )
+                            // 刷新期间换成转圈：串行队列要跑几秒，没有反馈就会被当成"点了没用"
+                            if (refreshing) {
+                                Box(
+                                    modifier = Modifier.size(24.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    InfiniteProgressIndicator(color = colorScheme.primary)
+                                }
+                            } else {
+                                Icon(
+                                    Icons.Rounded.Refresh,
+                                    contentDescription = stringResource(R.string.account_refresh),
+                                    tint = colorScheme.onBackground,
+                                )
+                            }
                         }
                     }
                     Box(
@@ -367,6 +387,14 @@ private fun CreditSummaryCard(
     val summary = remember(accounts, credits) {
         CreditStats.summarize(accounts, credits, System.currentTimeMillis())
     }
+    /**
+     * 正在刷新的账号数。
+     *
+     * 与 `summary.loading` 不是一个口径：强刷时旧余额还留着（[CreditStats] 照常把它算进
+     * 已统计），所以 loading 是 0，用户会觉得"数字没动、也没在动"。这一行补上"正在刷新"，
+     * 让顶部的总额自带一句"这是旧值，正在更新"。
+     */
+    val refreshingCount = accounts.count { credits[it.id]?.loading == true }
     Card(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp, 14.dp)) {
             Text(
@@ -397,6 +425,7 @@ private fun CreditSummaryCard(
                 )
             }
             val notes = buildList {
+                if (refreshingCount > 0) add("正在刷新 $refreshingCount 个账号")
                 if (summary.loading > 0) add("${summary.loading} 个账号查询中")
                 if (summary.failed > 0) add("${summary.failed} 个账号查询失败")
                 if (summary.skipped > 0) add("${summary.skipped} 个账号缺 uid 未统计")
@@ -462,13 +491,16 @@ private fun WbAccountRow(
     val fiveDays = CreditStats.expiringWithin(balance, 5, now)
 
     val remainingText = when {
+        // 「刷新中」优先于旧余额：刷新期间还挂着上一次的数字，界面上就看不出刷新发生过，
+        // 用户会反复点按钮。新数字回来后会立刻覆盖这两行。
+        credit?.loading == true -> "刷新中…"
         balance != null -> "剩余 " + WorkBuddyCredits.format(balance.remaining)
-        credit?.loading == true -> "查询中…"
         credit?.error?.isNotEmpty() == true -> "查询失败"
         account.uid.isEmpty() -> "缺 uid"
         else -> "待查询"
     }
     val expiryText = when {
+        credit?.loading == true -> "正在刷新积分…"
         balance != null ->
             "3 日内 " + WorkBuddyCredits.format(threeDays) + " · 5 日内 " + WorkBuddyCredits.format(fiveDays)
         credit?.error?.isNotEmpty() == true -> "3 日内 — · 5 日内 —"

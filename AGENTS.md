@@ -192,8 +192,13 @@ app/src/test/java/com/functy/fewards/
   `saveWorkBuddy` 每次写盘都自增；账号页与设置页两个 ViewModel 都 `drop(1)` 后订阅它。
   原因是三页常驻同一个 pager，切页既不重建 ViewModel 也不触发 resume——只靠 init 时读一次，
   就会出现"设置页同步过来的账号在账号页看不见"。**新加的写库路径必须走到 `saveWorkBuddy`**。
-- 账号页右上角有两个按钮：刷新（`account_refresh`，只重读本地库 + 命中缓存才查积分）与「+」。
-  切回账号页时也会 `refresh()` 一次（`AccountPager` 的 `LaunchedEffect(isCurrentPage)`）。
+- 账号页右上角有两个按钮：刷新（`account_refresh`，**强刷**：重读本地库 + 绕过 2 分钟缓存把所有账号的余额重查一遍）与「+」。
+  按钮走 `refresh(force = true)`，切回账号页的自动刷新走 `refresh()`（命中缓存就不查，见 `AccountPager` 的 `LaunchedEffect(isCurrentPage)`）。
+  别把按钮接回 `accountViewModel::refresh`：函数引用不吃默认参数，会退化成非强刷，点了数字不变。
+- 强刷期间要看得见：刷新图标换成转圈、行内显示「刷新中…」、汇总卡写「正在刷新 N 个账号」。
+  队列是**串行**的，只有当前账号会真正在查，靠状态位把"已受理"铺到所有待查账号上。
+  `wbCredits` 是只增不减的键集合，删号必须同步删条目（`removeWb` / 队列里 `acc == null` 两处都要），
+  否则残留的 `loading = true` 会让顶部转圈永远停不下来。
 - 配置导入导出（`ConfigTransferParser` / `ConfigTransferRepository` / 设置页「导入 / 导出配置」卡片）**已整体移除**：
   迁移账号现在走「从电脑同步凭据」。不要再加回来，也不要恢复 `_format=fewards-config` 备份格式。
 - 输入框用 miuix `basic.TextField`（`MultilineInputField` 包装）。不要用已删除的 `EditText.kt`。
